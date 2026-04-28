@@ -22,6 +22,7 @@ BC    = load("fact_conf_bc")
 AC    = load("fact_conf_ac")
 SCRAP = load("fact_nc_scrap")
 TOP   = load("agg_top_performers")  # for the leaderboard score
+CV    = load("fact_counter_verifier")
 
 # Normalize OP_ID to string everywhere
 def norm_op(x):
@@ -29,7 +30,7 @@ def norm_op(x):
     try:    return str(int(float(x))).zfill(6)
     except: return str(x).strip().zfill(6)
 
-for df in (PROD, BC, AC, SCRAP, TOP):
+for df in (PROD, BC, AC, SCRAP, TOP, CV):
     df["OP_ID"] = df["OP_ID"].apply(norm_op)
 
 # Build operator -> name lookup
@@ -61,16 +62,19 @@ CARD = {"backgroundColor": COLORS["card"], "padding": "16px",
 # 3. HELPERS
 # ============================================================
 def filter_facts(bus, crews, weeks, op_id):
-    """Return filtered copies of all 4 fact tables."""
+    """Return filtered copies of all 5 fact tables."""
     def f(df):
         d = df
         if bus:   d = d[d["BU"].isin(bus)]
         if crews: d = d[d["CREW"].isin(crews)]
-        if weeks and "PROD_WEEK" in d.columns:
-            d = d[d["PROD_WEEK"].isin(weeks)]
+        if weeks:
+            if "PROD_WEEK" in d.columns:
+                d = d[d["PROD_WEEK"].isin(weeks)]
+            elif "WEEK" in d.columns:
+                d = d[d["WEEK"].isin(weeks)]
         if op_id: d = d[d["OP_ID"] == str(op_id)]
         return d
-    return f(PROD), f(BC), f(AC), f(SCRAP)
+    return f(PROD), f(BC), f(AC), f(SCRAP), f(CV)
 
 def kpi_tile(label, value, suffix="", color=None):
     color = color or COLORS["primary"]
@@ -129,11 +133,11 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "16px",
 
     # ---- KPI Cards ----
     html.Div(id="kpi-row",
-             style={"display": "grid", "gridTemplateColumns": "repeat(4, 1fr)",
+             style={"display": "grid", "gridTemplateColumns": "repeat(5, 1fr)",
                     "gap": "8px", "marginTop": "12px"}),
 
     # ---- Donut row ----
-    html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(3, 1fr)",
+    html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(4, 1fr)",
                     "gap": "8px", "marginTop": "12px"}, children=[
         html.Div(style=CARD, children=[
             html.H4("Before Cure — CQ Breakdown", style={"margin": "0 0 8px 0"}),
@@ -146,6 +150,10 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "16px",
         html.Div(style=CARD, children=[
             html.H4("NC Scrap — TBM Breakdown", style={"margin": "0 0 8px 0"}),
             dcc.Graph(id="donut-scrap", config={"displayModeBar": False}),
+        ]),
+        html.Div(style=CARD, children=[
+            html.H4("Counter Verifier — Leaks by Station", style={"margin": "0 0 8px 0"}),
+            dcc.Graph(id="donut-cv", config={"displayModeBar": False}),
         ]),
     ]),
 
@@ -210,6 +218,7 @@ def render_op_chip(op_id):
     Output("donut-bc",    "figure"),
     Output("donut-ac",    "figure"),
     Output("donut-scrap", "figure"),
+    Output("donut-cv",    "figure"),
     Output("trend-chart", "figure"),
     Output("top-table",   "children"),
     Input("f-bu",   "value"),
@@ -218,7 +227,7 @@ def render_op_chip(op_id):
     Input("f-op",   "data"),
 )
 def update_all(bus, crews, weeks, op_id):
-    prod, bc, ac, scrap = filter_facts(bus, crews, weeks, op_id)
+    prod, bc, ac, scrap, cv = filter_facts(bus, crews, weeks, op_id)
 
     # ---------- KPIs ----------
     tires    = float(prod["TIRES_BUILT"].sum())
@@ -230,6 +239,10 @@ def update_all(bus, crews, weeks, op_id):
     ac_pct   = (ac_cnt / tires * 100) if tires else 0
     scrap_pt = (scrap_lb / tires)     if tires else 0
 
+    cv_total = float(len(cv))
+    cv_leaks = float(cv["IS_LEAK"].sum()) if "IS_LEAK" in cv.columns else 0.0
+    cv_pct   = (cv_leaks / cv_total * 100) if cv_total else 0
+
     kpis = [
         kpi_tile("Tires Built",  f"{tires:,.0f}",       color=COLORS["primary"]),
         kpi_tile("Before Cure %", f"{bc_pct:.2f}", "%",
@@ -237,6 +250,8 @@ def update_all(bus, crews, weeks, op_id):
         kpi_tile("After Cure %",  f"{ac_pct:.2f}", "%",
                  color=COLORS["danger"] if ac_pct > 5 else COLORS["good"]),
         kpi_tile("Scrap lbs/tire", f"{scrap_pt:.3f}",   color=COLORS["accent"]),
+        kpi_tile("Counter Verifier %", f"{cv_pct:.2f}", "%",
+                 color=COLORS["danger"] if cv_pct > 8 else COLORS["good"]),
     ]
 
     # ---------- Donuts ----------
@@ -270,6 +285,25 @@ def update_all(bus, crews, weeks, op_id):
     donut_ac    = make_donut(ac,    "CQ_DESCRIPTION", ac_cnt)
     donut_scrap = make_donut(scrap, "TBM",            scrap_lb)
 
+    cv_leaks_only = cv[cv["IS_LEAK"] == 1]
+    if len(cv_leaks_only):
+        grp = (cv_leaks_only.groupby("COUNTER_VERIFIER_ID").size()
+                            .sort_values(ascending=False).head(10))
+        donut_cv = go.Figure(data=[go.Pie(
+            labels=[f"CV {int(i)}" for i in grp.index],
+            values=grp.values, hole=0.55, textinfo="percent",
+            hovertemplate="%{label}<br>%{value:,} leaks (%{percent})<extra></extra>")])
+        donut_cv.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=320,
+                               showlegend=True,
+                               legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=10)),
+                               annotations=[dict(text=f"{int(grp.sum()):,}", x=0.5, y=0.5,
+                                                 font_size=18, showarrow=False)])
+    else:
+        donut_cv = go.Figure()
+        donut_cv.add_annotation(text="No leaks", x=0.5, y=0.5, showarrow=False,
+                                font=dict(size=16, color=COLORS["muted"]))
+        donut_cv.update_layout(height=320, margin=dict(l=10,r=10,t=10,b=10))
+
     # ---------- Weekly trend ----------
     keys = ["PROD_YEAR","PROD_WEEK"]
     p_w  = prod.groupby(keys, dropna=False)["TIRES_BUILT"].sum().reset_index()
@@ -287,6 +321,17 @@ def update_all(bus, crews, weeks, op_id):
         t[c] = t[c].fillna(0)
     t["BC_PCT"] = (t["BC_COUNT"] / t["TIRES_BUILT"].replace(0, pd.NA) * 100).round(3)
     t["AC_PCT"] = (t["AC_COUNT"] / t["TIRES_BUILT"].replace(0, pd.NA) * 100).round(3)
+
+    cv_w = cv.copy()
+    cv_w = (cv_w.groupby(["YEAR","WEEK"], dropna=False)
+                .agg(CV_TIRES=("MATRICULE","count"),
+                     CV_LEAKS=("IS_LEAK","sum"))
+                .reset_index()
+                .rename(columns={"YEAR":"PROD_YEAR","WEEK":"PROD_WEEK"}))
+    cv_w["CV_PCT"] = (cv_w["CV_LEAKS"] / cv_w["CV_TIRES"].replace(0, pd.NA) * 100).round(3)
+
+    t = t.merge(cv_w[["PROD_YEAR","PROD_WEEK","CV_PCT"]], on=keys, how="left")
+
     t["WEEK_LABEL"] = (t["PROD_YEAR"].astype(int).astype(str)
                        + "-W" + t["PROD_WEEK"].astype(int).astype(str).str.zfill(2))
     t = t.sort_values(keys)
@@ -301,6 +346,10 @@ def update_all(bus, crews, weeks, op_id):
     trend_fig.add_scatter(x=t["WEEK_LABEL"], y=t["AC_PCT"], name="AC%",
                           mode="lines+markers",
                           line=dict(color=COLORS["accent"], width=3), yaxis="y2")
+    trend_fig.add_scatter(x=t["WEEK_LABEL"], y=t["CV_PCT"], name="CV%",
+                          mode="lines+markers",
+                          line=dict(color=COLORS["good"], width=3, dash="dot"),
+                          yaxis="y2")
     trend_fig.update_layout(
         margin=dict(l=10,r=10,t=10,b=10), height=340,
         yaxis=dict(title="Tires Built"),
@@ -341,4 +390,4 @@ def update_all(bus, crews, weeks, op_id):
                            style={"width": "100%", "borderCollapse": "collapse",
                                   "fontSize": "13px"})
 
-    return kpis, donut_bc, donut_ac, donut_scrap, trend_fig, top_table
+    return kpis, donut_bc, donut_ac, donut_scrap, donut_cv, trend_fig, top_table

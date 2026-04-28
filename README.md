@@ -50,8 +50,21 @@ nc_scrap ───────────────────────�
 
 ## 🎨 Webapp features
 
-- KPI cards: Tires Built, Before Cure %, After Cure %, Scrap lbs/tire
-- 3 donut charts: BC / AC / Scrap breakdown
-- Weekly trend (bars + lines)
+- KPI cards: Tires Built, Before Cure %, After Cure %, Scrap lbs/tire, **Counter Verifier %**
+- 4 donut charts: BC / AC / Scrap breakdown, **Counter Verifier leaks by station**
+- Weekly trend (bars + lines), including **CV% line**
 - Top 10 operator leaderboard with **clickable drill-down** (click name → entire dashboard filters to that operator)
 - Filters: BU, Crew, Week, Operator
+
+## 📡 Datasets
+
+The webapp reads the following Dataiku datasets at runtime:
+
+| Dataset | Description |
+|---|---|
+| `fact_first_step` | Tires built per operator/day/TBM |
+| `fact_conf_bc` | Before-Cure CQ events |
+| `fact_conf_ac` | After-Cure CQ events |
+| `fact_nc_scrap` | NC scrap lbs per operator/day/TBM |
+| `agg_top_performers` | Operator leaderboard scores |
+| `fact_counter_verifier` | End-of-line Counter Verifier leak results — drives the Counter Verifier % KPI, leaks-by-station donut, and CV% trend line |
