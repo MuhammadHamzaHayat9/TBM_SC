@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Tire Building Scorecard — Dash Webapp
-Filters: BU, Crew, Week, Operator (click on leaderboard name to drill in)
+Two tabs:
+  1) Confection ScoreCard  — Tires Built, Before Cure %, After Cure %, Scrap
+  2) Finish ScoreCard       — Counter Verifier leak %
+Filters (BU, Crew, Week, Operator) are shared across both tabs.
 """
 
 import dataiku
@@ -10,7 +13,7 @@ import plotly.graph_objects as go
 from dash import dcc, html, Input, Output, ALL, ctx, no_update
 
 # ============================================================
-# 1. LOAD FACT TABLES (operator-grain so all filters work)
+# 1. LOAD FACT TABLES
 # ============================================================
 def load(name):
     df = dataiku.Dataset(name).get_dataframe()
@@ -21,10 +24,9 @@ PROD  = load("fact_first_step")
 BC    = load("fact_conf_bc")
 AC    = load("fact_conf_ac")
 SCRAP = load("fact_nc_scrap")
-TOP   = load("agg_top_performers")  # for the leaderboard score
+TOP   = load("agg_top_performers")
 CV    = load("fact_counter_verifier")
 
-# Normalize OP_ID to string everywhere
 def norm_op(x):
     if pd.isna(x): return None
     try:    return str(int(float(x))).zfill(6)
@@ -33,7 +35,6 @@ def norm_op(x):
 for df in (PROD, BC, AC, SCRAP, TOP, CV):
     df["OP_ID"] = df["OP_ID"].apply(norm_op)
 
-# Build operator -> name lookup
 OP_NAME = (PROD.dropna(subset=["OPERATOR_NAME"])
                 .drop_duplicates("OP_ID")
                 .set_index("OP_ID")["OPERATOR_NAME"].to_dict())
@@ -58,11 +59,18 @@ CARD = {"backgroundColor": COLORS["card"], "padding": "16px",
         "borderRadius": "10px", "boxShadow": "0 2px 6px rgba(0,0,0,0.08)",
         "margin": "8px"}
 
+TAB_STYLE = {"padding": "12px 20px", "fontWeight": "600",
+             "border": "none", "backgroundColor": "transparent",
+             "color": COLORS["muted"]}
+TAB_SELECTED_STYLE = {"padding": "12px 20px", "fontWeight": "700",
+                      "borderBottom": f"3px solid {COLORS['primary']}",
+                      "backgroundColor": "transparent",
+                      "color": COLORS["primary"]}
+
 # ============================================================
 # 3. HELPERS
 # ============================================================
 def filter_facts(bus, crews, weeks, op_id):
-    """Return filtered copies of all 5 fact tables."""
     def f(df):
         d = df
         if bus:   d = d[d["BU"].isin(bus)]
@@ -85,6 +93,13 @@ def kpi_tile(label, value, suffix="", color=None):
                                             "fontWeight": "700", "marginTop": "6px"}),
     ])
 
+def empty_fig(msg="No data"):
+    fig = go.Figure()
+    fig.add_annotation(text=msg, x=0.5, y=0.5, showarrow=False,
+                       font=dict(size=16, color=COLORS["muted"]))
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=10,b=10))
+    return fig
+
 # ============================================================
 # 4. LAYOUT
 # ============================================================
@@ -101,7 +116,7 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "16px",
         html.Div("Live from Dataiku Flow", style={"color": COLORS["muted"]}),
     ]),
 
-    # ---- Filters ----
+    # ---- Filters (shared across tabs) ----
     html.Div(style={**CARD, "display": "flex", "gap": "16px", "alignItems": "flex-end"},
              children=[
         html.Div(style={"flex": 1}, children=[
@@ -131,50 +146,22 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "16px",
         dcc.Store(id="f-op", data=None),
     ]),
 
-    # ---- KPI Cards ----
-    html.Div(id="kpi-row",
-             style={"display": "grid", "gridTemplateColumns": "repeat(5, 1fr)",
-                    "gap": "8px", "marginTop": "12px"}),
+    # ---- TABS ----
+    dcc.Tabs(id="tabs", value="tab-conf", children=[
+        dcc.Tab(label="🛠 Confection ScoreCard", value="tab-conf",
+                style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+        dcc.Tab(label="✅ Finish ScoreCard", value="tab-finish",
+                style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+    ], style={"marginTop": "12px"}),
 
-    # ---- Donut row ----
-    html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(4, 1fr)",
-                    "gap": "8px", "marginTop": "12px"}, children=[
-        html.Div(style=CARD, children=[
-            html.H4("Before Cure — CQ Breakdown", style={"margin": "0 0 8px 0"}),
-            dcc.Graph(id="donut-bc", config={"displayModeBar": False}),
-        ]),
-        html.Div(style=CARD, children=[
-            html.H4("After Cure — CQ Breakdown", style={"margin": "0 0 8px 0"}),
-            dcc.Graph(id="donut-ac", config={"displayModeBar": False}),
-        ]),
-        html.Div(style=CARD, children=[
-            html.H4("NC Scrap — TBM Breakdown", style={"margin": "0 0 8px 0"}),
-            dcc.Graph(id="donut-scrap", config={"displayModeBar": False}),
-        ]),
-        html.Div(style=CARD, children=[
-            html.H4("Counter Verifier — Leaks by Station", style={"margin": "0 0 8px 0"}),
-            dcc.Graph(id="donut-cv", config={"displayModeBar": False}),
-        ]),
-    ]),
-
-    # ---- Trend + leaderboard row ----
-    html.Div(style={"display": "grid", "gridTemplateColumns": "2fr 1fr",
-                    "gap": "8px", "marginTop": "12px"}, children=[
-        html.Div(style=CARD, children=[
-            html.H4("Weekly Trend", style={"margin": "0 0 8px 0"}),
-            dcc.Graph(id="trend-chart", config={"displayModeBar": False}),
-        ]),
-        html.Div(style=CARD, children=[
-            html.H4("🏆 Top 10 Performers", style={"margin": "0 0 8px 0"}),
-            html.Div(id="top-table"),
-        ]),
-    ]),
+    # ---- Tab content (rendered by callback) ----
+    html.Div(id="tab-content", style={"marginTop": "8px"}),
 ])
 
 # ============================================================
 # 5. CALLBACKS
 # ============================================================
-# ---- Operator click + clear ----
+# ---- Operator click ----
 @app.callback(
     Output("f-op", "data"),
     Input({"type": "op-link", "index": ALL}, "n_clicks"),
@@ -190,7 +177,7 @@ def select_operator(_clicks, _clear):
             return trig["index"]
     return no_update
 
-# ---- Operator chip display ----
+# ---- Operator chip ----
 @app.callback(
     Output("f-op-display", "children"),
     Input("f-op", "data"),
@@ -212,24 +199,27 @@ def render_op_chip(op_id):
                            "color": COLORS["danger"], "cursor": "pointer", "fontSize": "12px"}),
     ]
 
-# ---- Main update ----
+# ---- TAB ROUTER: render the correct content per tab ----
 @app.callback(
-    Output("kpi-row",     "children"),
-    Output("donut-bc",    "figure"),
-    Output("donut-ac",    "figure"),
-    Output("donut-scrap", "figure"),
-    Output("donut-cv",    "figure"),
-    Output("trend-chart", "figure"),
-    Output("top-table",   "children"),
+    Output("tab-content", "children"),
+    Input("tabs",   "value"),
     Input("f-bu",   "value"),
     Input("f-crew", "value"),
     Input("f-week", "value"),
     Input("f-op",   "data"),
 )
-def update_all(bus, crews, weeks, op_id):
+def render_tab(tab, bus, crews, weeks, op_id):
     prod, bc, ac, scrap, cv = filter_facts(bus, crews, weeks, op_id)
 
-    # ---------- KPIs ----------
+    if tab == "tab-conf":
+        return render_confection(prod, bc, ac, scrap, bus, crews, op_id)
+    else:
+        return render_finish(cv)
+
+# ============================================================
+# 6. CONFECTION SCORECARD
+# ============================================================
+def render_confection(prod, bc, ac, scrap, bus, crews, op_id):
     tires    = float(prod["TIRES_BUILT"].sum())
     bc_cnt   = float(bc.dropna(subset=["CQ_CODE_STR"]).shape[0])
     ac_cnt   = float(ac.dropna(subset=["CQ_CODE_STR"]).shape[0])
@@ -239,10 +229,6 @@ def update_all(bus, crews, weeks, op_id):
     ac_pct   = (ac_cnt / tires * 100) if tires else 0
     scrap_pt = (scrap_lb / tires)     if tires else 0
 
-    cv_total = float(len(cv))
-    cv_leaks = float(cv["IS_LEAK"].sum()) if "IS_LEAK" in cv.columns else 0.0
-    cv_pct   = (cv_leaks / cv_total * 100) if cv_total else 0
-
     kpis = [
         kpi_tile("Tires Built",  f"{tires:,.0f}",       color=COLORS["primary"]),
         kpi_tile("Before Cure %", f"{bc_pct:.2f}", "%",
@@ -250,26 +236,19 @@ def update_all(bus, crews, weeks, op_id):
         kpi_tile("After Cure %",  f"{ac_pct:.2f}", "%",
                  color=COLORS["danger"] if ac_pct > 5 else COLORS["good"]),
         kpi_tile("Scrap lbs/tire", f"{scrap_pt:.3f}",   color=COLORS["accent"]),
-        kpi_tile("Counter Verifier %", f"{cv_pct:.2f}", "%",
-                 color=COLORS["danger"] if cv_pct > 8 else COLORS["good"]),
     ]
 
-    # ---------- Donuts ----------
-    def make_donut(df, label_col, color_total):
+    # Donuts
+    def make_donut(df, label_col, value_col=None):
         d = df.copy()
         if label_col == "CQ_DESCRIPTION":
             d = d.dropna(subset=["CQ_CODE_STR"])
             d[label_col] = d[label_col].fillna(d["CQ_CODE_STR"])
             grp = d.groupby(label_col).size().sort_values(ascending=False).head(10)
-        else:  # TBM for scrap
-            grp = d.groupby(label_col)["OP_SCRAP_LBS_BY_TIRES"].sum() \
-                   .sort_values(ascending=False).head(10)
+        else:
+            grp = d.groupby(label_col)[value_col].sum().sort_values(ascending=False).head(10)
         if grp.empty:
-            fig = go.Figure()
-            fig.add_annotation(text="No data", x=0.5, y=0.5, showarrow=False,
-                               font=dict(size=16, color=COLORS["muted"]))
-            fig.update_layout(height=320, margin=dict(l=10,r=10,t=10,b=10))
-            return fig
+            return empty_fig()
         fig = go.Figure(data=[go.Pie(
             labels=grp.index.astype(str), values=grp.values,
             hole=0.55, textinfo="percent",
@@ -281,30 +260,11 @@ def update_all(bus, crews, weeks, op_id):
                                             font_size=18, showarrow=False)])
         return fig
 
-    donut_bc    = make_donut(bc,    "CQ_DESCRIPTION", bc_cnt)
-    donut_ac    = make_donut(ac,    "CQ_DESCRIPTION", ac_cnt)
-    donut_scrap = make_donut(scrap, "TBM",            scrap_lb)
+    donut_bc    = make_donut(bc,    "CQ_DESCRIPTION")
+    donut_ac    = make_donut(ac,    "CQ_DESCRIPTION")
+    donut_scrap = make_donut(scrap, "TBM", "OP_SCRAP_LBS_BY_TIRES")
 
-    cv_leaks_only = cv[cv["IS_LEAK"] == 1]
-    if len(cv_leaks_only):
-        grp = (cv_leaks_only.groupby("COUNTER_VERIFIER_ID").size()
-                            .sort_values(ascending=False).head(10))
-        donut_cv = go.Figure(data=[go.Pie(
-            labels=[f"CV {int(i)}" for i in grp.index],
-            values=grp.values, hole=0.55, textinfo="percent",
-            hovertemplate="%{label}<br>%{value:,} leaks (%{percent})<extra></extra>")])
-        donut_cv.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=320,
-                               showlegend=True,
-                               legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=10)),
-                               annotations=[dict(text=f"{int(grp.sum()):,}", x=0.5, y=0.5,
-                                                 font_size=18, showarrow=False)])
-    else:
-        donut_cv = go.Figure()
-        donut_cv.add_annotation(text="No leaks", x=0.5, y=0.5, showarrow=False,
-                                font=dict(size=16, color=COLORS["muted"]))
-        donut_cv.update_layout(height=320, margin=dict(l=10,r=10,t=10,b=10))
-
-    # ---------- Weekly trend ----------
+    # Weekly trend
     keys = ["PROD_YEAR","PROD_WEEK"]
     p_w  = prod.groupby(keys, dropna=False)["TIRES_BUILT"].sum().reset_index()
     bc_w = (bc.dropna(subset=["CQ_CODE_STR"])
@@ -313,43 +273,24 @@ def update_all(bus, crews, weeks, op_id):
               .groupby(keys, dropna=False).size().reset_index(name="AC_COUNT"))
     sc_w = (scrap.groupby(keys, dropna=False)["OP_SCRAP_LBS_BY_TIRES"]
                  .sum().reset_index(name="SCRAP_LBS"))
-
-    t = p_w.merge(bc_w, on=keys, how="left") \
-           .merge(ac_w, on=keys, how="left") \
-           .merge(sc_w, on=keys, how="left")
+    t = p_w.merge(bc_w, on=keys, how="left").merge(ac_w, on=keys, how="left").merge(sc_w, on=keys, how="left")
     for c in ["BC_COUNT","AC_COUNT","SCRAP_LBS"]:
         t[c] = t[c].fillna(0)
     t["BC_PCT"] = (t["BC_COUNT"] / t["TIRES_BUILT"].replace(0, pd.NA) * 100).round(3)
     t["AC_PCT"] = (t["AC_COUNT"] / t["TIRES_BUILT"].replace(0, pd.NA) * 100).round(3)
-
-    cv_w = cv.copy()
-    cv_w = (cv_w.groupby(["YEAR","WEEK"], dropna=False)
-                .agg(CV_TIRES=("MATRICULE","count"),
-                     CV_LEAKS=("IS_LEAK","sum"))
-                .reset_index()
-                .rename(columns={"YEAR":"PROD_YEAR","WEEK":"PROD_WEEK"}))
-    cv_w["CV_PCT"] = (cv_w["CV_LEAKS"] / cv_w["CV_TIRES"].replace(0, pd.NA) * 100).round(3)
-
-    t = t.merge(cv_w[["PROD_YEAR","PROD_WEEK","CV_PCT"]], on=keys, how="left")
-
     t["WEEK_LABEL"] = (t["PROD_YEAR"].astype(int).astype(str)
                        + "-W" + t["PROD_WEEK"].astype(int).astype(str).str.zfill(2))
     t = t.sort_values(keys)
 
     trend_fig = go.Figure()
     trend_fig.add_bar(x=t["WEEK_LABEL"], y=t["TIRES_BUILT"],
-                      name="Tires Built", marker_color=COLORS["primary"], opacity=0.55,
-                      yaxis="y1")
+                      name="Tires Built", marker_color=COLORS["primary"], opacity=0.55, yaxis="y1")
     trend_fig.add_scatter(x=t["WEEK_LABEL"], y=t["BC_PCT"], name="BC%",
                           mode="lines+markers",
                           line=dict(color=COLORS["danger"], width=3), yaxis="y2")
     trend_fig.add_scatter(x=t["WEEK_LABEL"], y=t["AC_PCT"], name="AC%",
                           mode="lines+markers",
                           line=dict(color=COLORS["accent"], width=3), yaxis="y2")
-    trend_fig.add_scatter(x=t["WEEK_LABEL"], y=t["CV_PCT"], name="CV%",
-                          mode="lines+markers",
-                          line=dict(color=COLORS["good"], width=3, dash="dot"),
-                          yaxis="y2")
     trend_fig.update_layout(
         margin=dict(l=10,r=10,t=10,b=10), height=340,
         yaxis=dict(title="Tires Built"),
@@ -358,7 +299,7 @@ def update_all(bus, crews, weeks, op_id):
         legend=dict(orientation="h", y=-0.2),
     )
 
-    # ---------- Top performers (always uses TOP, but BU/Crew/Op aware) ----------
+    # Top performers
     top_filt = TOP[TOP["RANKABLE"] == True].copy()
     if bus:   top_filt = top_filt[top_filt["BU"].isin(bus)]
     if crews: top_filt = top_filt[top_filt["CREW"].isin(crews)]
@@ -372,8 +313,7 @@ def update_all(bus, crews, weeks, op_id):
     for _, r in top_filt.iterrows():
         op = r["OP_ID"]
         table_rows.append(html.Tr([
-            html.Td(int(r["RANK"]) if pd.notna(r["RANK"]) else "",
-                    style={"padding": "6px"}),
+            html.Td(int(r["RANK"]) if pd.notna(r["RANK"]) else "", style={"padding": "6px"}),
             html.Td(html.A(r["OPERATOR_NAME"],
                            id={"type": "op-link", "index": str(op)},
                            n_clicks=0,
@@ -381,13 +321,180 @@ def update_all(bus, crews, weeks, op_id):
                                   "textDecoration": "underline"}),
                     style={"padding": "6px"}),
             html.Td(r["BU"], style={"padding": "6px"}),
-            html.Td(int(r["CREW"]) if pd.notna(r["CREW"]) else "",
-                    style={"padding": "6px"}),
+            html.Td(int(r["CREW"]) if pd.notna(r["CREW"]) else "", style={"padding": "6px"}),
             html.Td(f"{int(r['TIRES_BUILT']):,}", style={"padding": "6px"}),
             html.Td(f"{r['QUALITY_SCORE']:.1f}", style={"padding": "6px"}),
         ], style={"borderBottom": "1px solid #eee"}))
-    top_table = html.Table(table_rows,
-                           style={"width": "100%", "borderCollapse": "collapse",
-                                  "fontSize": "13px"})
+    top_table = html.Table(table_rows, style={"width": "100%", "borderCollapse": "collapse",
+                                               "fontSize": "13px"})
 
-    return kpis, donut_bc, donut_ac, donut_scrap, donut_cv, trend_fig, top_table
+    return html.Div([
+        html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(4, 1fr)",
+                        "gap": "8px", "marginTop": "12px"}, children=kpis),
+        html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(3, 1fr)",
+                        "gap": "8px", "marginTop": "12px"}, children=[
+            html.Div(style=CARD, children=[
+                html.H4("Before Cure — CQ Breakdown", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=donut_bc, config={"displayModeBar": False}),
+            ]),
+            html.Div(style=CARD, children=[
+                html.H4("After Cure — CQ Breakdown", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=donut_ac, config={"displayModeBar": False}),
+            ]),
+            html.Div(style=CARD, children=[
+                html.H4("NC Scrap — TBM Breakdown", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=donut_scrap, config={"displayModeBar": False}),
+            ]),
+        ]),
+        html.Div(style={"display": "grid", "gridTemplateColumns": "2fr 1fr",
+                        "gap": "8px", "marginTop": "12px"}, children=[
+            html.Div(style=CARD, children=[
+                html.H4("Weekly Trend", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=trend_fig, config={"displayModeBar": False}),
+            ]),
+            html.Div(style=CARD, children=[
+                html.H4("🏆 Top 10 Performers", style={"margin": "0 0 8px 0"}),
+                top_table,
+            ]),
+        ]),
+    ])
+
+# ============================================================
+# 7. FINISH SCORECARD
+# ============================================================
+def render_finish(cv):
+    cv_total = float(len(cv))
+    cv_leaks = float(cv["IS_LEAK"].sum()) if "IS_LEAK" in cv.columns else 0.0
+    cv_pct   = (cv_leaks / cv_total * 100) if cv_total else 0
+    cv_ok    = cv_total - cv_leaks
+
+    kpis = [
+        kpi_tile("CV Tires Tested", f"{cv_total:,.0f}", color=COLORS["primary"]),
+        kpi_tile("CV Leaks (Y)",    f"{cv_leaks:,.0f}", color=COLORS["danger"]),
+        kpi_tile("CV OK (N)",       f"{cv_ok:,.0f}",    color=COLORS["good"]),
+        kpi_tile("Counter Verifier %", f"{cv_pct:.2f}", "%",
+                 color=COLORS["danger"] if cv_pct > 8 else COLORS["good"]),
+    ]
+
+    # Donut: leaks by CV station
+    leaks_only = cv[cv["IS_LEAK"] == 1] if "IS_LEAK" in cv.columns else cv.iloc[0:0]
+    if len(leaks_only):
+        grp = leaks_only.groupby("COUNTER_VERIFIER_ID").size().sort_values(ascending=False).head(10)
+        donut_station = go.Figure(data=[go.Pie(
+            labels=[f"CV {int(i)}" for i in grp.index], values=grp.values,
+            hole=0.55, textinfo="percent",
+            hovertemplate="%{label}<br>%{value:,} leaks (%{percent})<extra></extra>")])
+        donut_station.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=320,
+                                    showlegend=True,
+                                    legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=10)),
+                                    annotations=[dict(text=f"{int(grp.sum()):,}", x=0.5, y=0.5,
+                                                      font_size=18, showarrow=False)])
+    else:
+        donut_station = empty_fig("No leaks")
+
+    # Donut: leaks by shift
+    if len(leaks_only):
+        grp_s = leaks_only.groupby("SHIFT").size().sort_values(ascending=False)
+        donut_shift = go.Figure(data=[go.Pie(
+            labels=[f"Shift {s}" for s in grp_s.index], values=grp_s.values,
+            hole=0.55, textinfo="percent+label",
+            hovertemplate="%{label}<br>%{value:,} leaks (%{percent})<extra></extra>")])
+        donut_shift.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=320,
+                                  showlegend=False,
+                                  annotations=[dict(text=f"{int(grp_s.sum()):,}", x=0.5, y=0.5,
+                                                    font_size=18, showarrow=False)])
+    else:
+        donut_shift = empty_fig("No leaks")
+
+    # Weekly trend (CV%)
+    if len(cv):
+        cv_w = (cv.groupby(["YEAR","WEEK"], dropna=False)
+                  .agg(CV_TIRES=("MATRICULE","count"),
+                       CV_LEAKS=("IS_LEAK","sum"))
+                  .reset_index())
+        cv_w["CV_PCT"] = (cv_w["CV_LEAKS"] / cv_w["CV_TIRES"].replace(0, pd.NA) * 100).round(3)
+        cv_w["WEEK_LABEL"] = (cv_w["YEAR"].astype(int).astype(str)
+                              + "-W" + cv_w["WEEK"].astype(int).astype(str).str.zfill(2))
+        cv_w = cv_w.sort_values(["YEAR","WEEK"])
+
+        trend_fig = go.Figure()
+        trend_fig.add_bar(x=cv_w["WEEK_LABEL"], y=cv_w["CV_TIRES"],
+                          name="Tires Tested", marker_color=COLORS["primary"], opacity=0.45, yaxis="y1")
+        trend_fig.add_scatter(x=cv_w["WEEK_LABEL"], y=cv_w["CV_PCT"], name="CV % Leaks",
+                              mode="lines+markers",
+                              line=dict(color=COLORS["danger"], width=3), yaxis="y2")
+        trend_fig.update_layout(
+            margin=dict(l=10,r=10,t=10,b=10), height=340,
+            yaxis=dict(title="Tires Tested"),
+            yaxis2=dict(title="Leak %", overlaying="y", side="right"),
+            xaxis=dict(title="Week"),
+            legend=dict(orientation="h", y=-0.2),
+        )
+    else:
+        trend_fig = empty_fig()
+
+    # Top 10 worst operators (by leak count, min 50 tires)
+    name_col = "OPERATOR_NAME" if "OPERATOR_NAME" in cv.columns else None
+    if name_col and len(cv):
+        gcols = ["OP_ID", name_col, "BU", "CREW"]
+        gcols = [c for c in gcols if c in cv.columns]
+        ops = (cv.dropna(subset=["OP_ID"])
+                 .groupby(gcols)
+                 .agg(tires=("MATRICULE","count"),
+                      leaks=("IS_LEAK","sum"))
+                 .reset_index())
+        ops["leak_pct"] = (ops["leaks"] / ops["tires"] * 100).round(2)
+        ops = ops[ops["tires"] >= 50].sort_values("leak_pct", ascending=False).head(10)
+
+        rows = [html.Tr(
+            [html.Th(c, style={"padding": "6px", "textAlign": "left"})
+             for c in ["Operator", "BU", "Crew", "Tires", "Leaks", "Leak %"]],
+            style={"backgroundColor": COLORS["danger"], "color": "white"})]
+        for _, r in ops.iterrows():
+            rows.append(html.Tr([
+                html.Td(html.A(r[name_col],
+                               id={"type": "op-link", "index": str(r["OP_ID"])},
+                               n_clicks=0,
+                               style={"color": COLORS["primary"], "cursor": "pointer",
+                                      "textDecoration": "underline"}),
+                        style={"padding": "6px"}),
+                html.Td(r.get("BU",""), style={"padding": "6px"}),
+                html.Td(int(r["CREW"]) if "CREW" in r and pd.notna(r["CREW"]) else "",
+                        style={"padding": "6px"}),
+                html.Td(f"{int(r['tires']):,}", style={"padding": "6px"}),
+                html.Td(f"{int(r['leaks']):,}", style={"padding": "6px"}),
+                html.Td(f"{r['leak_pct']:.2f}%", style={"padding": "6px",
+                                                        "color": COLORS["danger"],
+                                                        "fontWeight": "600"}),
+            ], style={"borderBottom": "1px solid #eee"}))
+        worst_table = html.Table(rows, style={"width": "100%", "borderCollapse": "collapse",
+                                              "fontSize": "13px"})
+    else:
+        worst_table = html.Div("No operator data", style={"color": COLORS["muted"]})
+
+    return html.Div([
+        html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(4, 1fr)",
+                        "gap": "8px", "marginTop": "12px"}, children=kpis),
+        html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(2, 1fr)",
+                        "gap": "8px", "marginTop": "12px"}, children=[
+            html.Div(style=CARD, children=[
+                html.H4("Leaks by Counter Verifier Station", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=donut_station, config={"displayModeBar": False}),
+            ]),
+            html.Div(style=CARD, children=[
+                html.H4("Leaks by Shift", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=donut_shift, config={"displayModeBar": False}),
+            ]),
+        ]),
+        html.Div(style={"display": "grid", "gridTemplateColumns": "2fr 1fr",
+                        "gap": "8px", "marginTop": "12px"}, children=[
+            html.Div(style=CARD, children=[
+                html.H4("CV Leak % — Weekly Trend", style={"margin": "0 0 8px 0"}),
+                dcc.Graph(figure=trend_fig, config={"displayModeBar": False}),
+            ]),
+            html.Div(style=CARD, children=[
+                html.H4("⚠️ Top 10 Worst Operators (CV Leaks)", style={"margin": "0 0 8px 0"}),
+                worst_table,
+            ]),
+        ]),
+    ])
