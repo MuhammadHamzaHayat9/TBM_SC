@@ -49,38 +49,47 @@ def norm_op_series(s):
     txt = txt.str.zfill(6)
     return txt.where(s.notna(), None)
 
-# --- 1st Step (Confection) aggregates ---
-TOP   = load("agg_top_performers")
-UNI   = load("agg_uniformity")
-DBC   = load("agg_donut_bc")
-DAC   = load("agg_donut_ac")
-DSC   = load("agg_donut_scrap")
-TREND = load("agg_weekly_trend")
-CV    = load("fact_counter_verifier")
-# --- 2nd Step (Finishing) aggregates (built by compute_*_fin recipes; may be empty) ---
-TOP_FIN   = load("agg_top_performers_fin")
-UNI_FIN   = load("agg_uniformity_fin")
-TREND_FIN = load("agg_weekly_trend_fin")
+def load_all():
+    """(Re)load every dataset into module globals. Called once at import and
+    again by the Refresh button, so the webapp can pick up newly-built data
+    without restarting the backend."""
+    global TOP, UNI, DBC, DAC, DSC, TREND, CV, TOP_FIN, UNI_FIN, TREND_FIN
+    global STEP_DS, OP_NAME, REFRESH
+    _CACHE.clear()
+    # --- 1st Step (Confection) aggregates ---
+    TOP   = load("agg_top_performers")
+    UNI   = load("agg_uniformity")
+    DBC   = load("agg_donut_bc")
+    DAC   = load("agg_donut_ac")
+    DSC   = load("agg_donut_scrap")
+    TREND = load("agg_weekly_trend")
+    CV    = load("fact_counter_verifier")
+    # --- 2nd Step (Finishing) aggregates (built by compute_*_fin recipes) ---
+    TOP_FIN   = load("agg_top_performers_fin")
+    UNI_FIN   = load("agg_uniformity_fin")
+    TREND_FIN = load("agg_weekly_trend_fin")
 
-for _df in (TOP, TOP_FIN, CV):
-    if not _df.empty and "OP_ID" in _df.columns:
-        _df["OP_ID"] = norm_op_series(_df["OP_ID"])
+    for _df in (TOP, TOP_FIN, CV):
+        if not _df.empty and "OP_ID" in _df.columns:
+            _df["OP_ID"] = norm_op_series(_df["OP_ID"])
 
-# Step registry: which datasets + CQ_RELATES_TO value drive each step
-STEP_DS = {
-    "1": {"label": "1st Step — Confection", "relates": "Confection",
-          "top": TOP,     "uni": UNI,     "trend": TREND},
-    "2": {"label": "2nd Step — Finishing",  "relates": "Finishing",
-          "top": TOP_FIN, "uni": UNI_FIN, "trend": TREND_FIN},
-}
+    STEP_DS = {
+        "1": {"label": "1st Step — Confection", "relates": "Confection",
+              "top": TOP,     "uni": UNI,     "trend": TREND},
+        "2": {"label": "2nd Step — Finishing",  "relates": "Finishing",
+              "top": TOP_FIN, "uni": UNI_FIN, "trend": TREND_FIN},
+    }
+    OP_NAME = {}
+    for _t in (TOP, TOP_FIN):
+        if not _t.empty and {"OP_ID", "OPERATOR_NAME"}.issubset(_t.columns):
+            OP_NAME.update(_t.dropna(subset=["OPERATOR_NAME"]).drop_duplicates("OP_ID")
+                             .set_index("OP_ID")["OPERATOR_NAME"].to_dict())
+    REFRESH = datetime.datetime.now().strftime("%m/%d/%Y %I:%M %p")
+
+load_all()
+
 def sds(step):
     return STEP_DS.get(str(step) if step else "1", STEP_DS["1"])
-
-OP_NAME = {}
-for _t in (TOP, TOP_FIN):
-    if not _t.empty and {"OP_ID", "OPERATOR_NAME"}.issubset(_t.columns):
-        OP_NAME.update(_t.dropna(subset=["OPERATOR_NAME"]).drop_duplicates("OP_ID")
-                         .set_index("OP_ID")["OPERATOR_NAME"].to_dict())
 
 def _uniq(df, col, cast=None):
     if df.empty or col not in df.columns:
@@ -531,12 +540,19 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "12px",
     # Title bar
     html.Div(style={"display": "grid", "gridTemplateColumns": "1fr 2fr 1fr", "alignItems": "center",
                     "marginBottom": "8px"}, children=[
-        html.Div(f"Last Refresh: {REFRESH}", style={"fontSize": "11px", "color": COLORS["muted"]}),
+        html.Div(f"Last Refresh: {REFRESH}", id="last-refresh",
+                 style={"fontSize": "11px", "color": COLORS["muted"]}),
         html.H1("Operator Quality Score Card",
                 style={"textAlign": "center", "margin": 0, "fontSize": "26px", "color": COLORS["ink"],
                        "fontWeight": "800"}),
-        html.Div(id="f-op-display", style={"display": "flex", "alignItems": "center", "gap": "8px",
-                                           "justifyContent": "flex-end"}),
+        html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px",
+                        "justifyContent": "flex-end"}, children=[
+            html.Button("🔄 Refresh data", id="btn-refresh", n_clicks=0,
+                        style={"backgroundColor": COLORS["btn"], "color": "white", "border": "none",
+                               "borderRadius": "6px", "padding": "7px 14px", "cursor": "pointer",
+                               "fontSize": "12px", "fontWeight": "600"}),
+            html.Div(id="f-op-display", style={"display": "flex", "alignItems": "center", "gap": "8px"}),
+        ]),
     ]),
 
     # Filters
@@ -570,6 +586,7 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "12px",
         dcc.Tab(label="🏅 Rankings", value="rank"),
     ]),
     dcc.Store(id="f-op", data=None),
+    dcc.Store(id="refresh-token", data=0),
     html.Div(id="content", style={"marginTop": "10px"}),
 ])
 
@@ -600,6 +617,16 @@ def nav_tab(clicks):
         return trig["to"]
     return no_update
 
+@app.callback(
+    Output("refresh-token", "data"),
+    Output("last-refresh", "children"),
+    Input("btn-refresh", "n_clicks"),
+    prevent_initial_call=True,
+)
+def do_refresh(n):
+    load_all()   # re-read every dataset from Dataiku, rebuild lookups
+    return (n or 0), f"Last Refresh: {REFRESH}"
+
 @app.callback(Output("f-op-display", "children"), Input("f-op", "data"))
 def render_op_chip(op_id):
     if not op_id:
@@ -617,8 +644,9 @@ def render_op_chip(op_id):
     Input("step", "value"), Input("tabs", "value"),
     Input("f-bu", "value"), Input("f-crew", "value"),
     Input("f-week", "value"), Input("f-op", "data"), Input("f-topn", "value"),
+    Input("refresh-token", "data"),
 )
-def render(step, tab, bus, crews, weeks, op_id, topn):
+def render(step, tab, bus, crews, weeks, op_id, topn, _tok):
     if tab == "cv":
         return page_counter_verifier(bus, crews, weeks, op_id)
     if tab == "rank":
