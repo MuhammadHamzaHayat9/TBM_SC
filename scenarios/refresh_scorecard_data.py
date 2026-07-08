@@ -34,8 +34,17 @@ SOURCES = [
     "counter_verifier", "TBM6",
 ]
 
-# Datasets the webapp reads directly (rebuilding these pulls their whole
-# upstream sub-tree along with them).
+# The dimension + fact layer. These MUST be force-rebuilt after the sources,
+# otherwise a smart recursive build can treat them as "up to date" and the
+# aggregates keep reading stale facts (e.g. 1st step stuck a week behind).
+FACTS = [
+    "dim_operator",
+    "fact_first_step", "fact_second_step",
+    "fact_conf_bc", "fact_conf_ac",
+    "fact_nc_scrap", "fact_uniformity",
+]
+
+# Datasets the webapp reads directly.
 WEBAPP_DATASETS = [
     "fact_counter_verifier",
     "agg_top_performers", "agg_uniformity",
@@ -57,7 +66,17 @@ for ds in SOURCES:
     except Exception as e:
         print(f"[source] skip {ds} (not buildable or missing): {e}")
 
-# 2) Rebuild everything the webapp reads (recursive -> whole sub-tree, once each)
+# 2) Force-rebuild the dimension + fact layer so they pick up the fresh sources
+#    (dim_operator first, then the facts that depend on it).
+for ds in FACTS:
+    try:
+        print(f"[fact] force-building {ds}")
+        scenario.build_dataset(ds, build_mode="NON_RECURSIVE_FORCED_BUILD")
+    except Exception as e:
+        print(f"[fact] FAILED {ds}: {e}")
+        failures.append(ds)
+
+# 3) Rebuild everything the webapp reads (recursive -> whole sub-tree, once each)
 for ds in WEBAPP_DATASETS:
     try:
         print(f"[webapp] building {ds} ({TERMINAL_MODE})")
