@@ -113,7 +113,12 @@ COLORS = {
 CAT = ["#118DFF", "#12239E", "#E66C37", "#6B007B", "#D9B300",
        "#D64550", "#197278", "#1AAB40", "#E044A7", "#744EC2"]
 CARD = {"backgroundColor": COLORS["card"], "padding": "14px", "borderRadius": "10px",
-        "boxShadow": "0 1px 4px rgba(0,0,0,0.10)", "margin": "6px"}
+        "boxShadow": "0 1px 4px rgba(0,0,0,0.10)", "margin": "6px",
+        # min-width:0 lets a card shrink inside grid/flex so a re-mounted Plotly
+        # graph can't force the row to overflow (which used to push cards off-screen)
+        "minWidth": 0}
+# Every dcc.Graph uses this so graphs refit their container after a tab switch.
+GRAPH_CFG = {"displayModeBar": False, "responsive": True}
 
 # ============================================================
 # 3. FILTER HELPERS
@@ -243,7 +248,7 @@ def metric_card(face_emoji, title, figure):
         html.Div([html.Span(face_emoji, style={"fontSize": "20px", "marginRight": "6px"}),
                   html.Span(title, style={"fontWeight": "600", "color": COLORS["ink"]})],
                  style={"textAlign": "center", "marginBottom": "2px"}),
-        dcc.Graph(figure=figure, config={"displayModeBar": False}),
+        dcc.Graph(figure=figure, config=GRAPH_CFG),
     ])
 
 # ============================================================
@@ -296,7 +301,7 @@ def page_scorecard(step, bus, crews, weeks, op_id):
         html.Div(style=CARD, children=[
             html.H4("Previous Weeks Results", style={"margin": "0 0 4px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
-            dcc.Graph(figure=trend_fig(step, bus, weeks), config={"displayModeBar": False})]),
+            dcc.Graph(figure=trend_fig(step, bus, weeks), config=GRAPH_CFG)]),
         html.Div(style=CARD, children=[
             html.H4("Total Quality — Top Performers", style={"margin": "0 0 8px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
@@ -460,9 +465,9 @@ def page_counter_verifier(bus, crews, weeks, op_id):
         kpis,
         html.Div(style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px", "marginTop": "8px"}, children=[
             html.Div(style=CARD, children=[html.H4("Leaks by Counter Verifier Station", style={"margin": "0 0 6px 0"}),
-                     dcc.Graph(figure=cv_donut, config={"displayModeBar": False})]),
+                     dcc.Graph(figure=cv_donut, config=GRAPH_CFG)]),
             html.Div(style=CARD, children=[html.H4("Leak % — Weekly Trend", style={"margin": "0 0 6px 0"}),
-                     dcc.Graph(figure=tf, config={"displayModeBar": False})])]),
+                     dcc.Graph(figure=tf, config=GRAPH_CFG)])]),
         html.Div(style={**CARD, "marginTop": "6px"}, children=[
             html.H4("⚠️ Highest Leak-Rate Operators (≥30 verified)", style={"margin": "0 0 6px 0"}), worst]),
     ])
@@ -508,11 +513,11 @@ def page_rankings(step, bus, crews, op_id, topn):
         return fig
     bars = html.Div(style={"display": "grid", "gridTemplateColumns": "repeat(3, 1fr)", "gap": "6px", "marginTop": "6px"}, children=[
         html.Div(style=CARD, children=[html.H4("Top RFT%", style={"margin": "0 0 6px 0"}),
-                 dcc.Graph(figure=bar("RFT_PCT", "RFT%", False), config={"displayModeBar": False})]),
+                 dcc.Graph(figure=bar("RFT_PCT", "RFT%", False), config=GRAPH_CFG)]),
         html.Div(style=CARD, children=[html.H4("Highest AC%", style={"margin": "0 0 6px 0"}),
-                 dcc.Graph(figure=bar("AC_PCT", "AC%", False), config={"displayModeBar": False})]),
+                 dcc.Graph(figure=bar("AC_PCT", "AC%", False), config=GRAPH_CFG)]),
         html.Div(style=CARD, children=[html.H4("Highest BC%", style={"margin": "0 0 6px 0"}),
-                 dcc.Graph(figure=bar("BC_PCT", "BC%", False), config={"displayModeBar": False})])])
+                 dcc.Graph(figure=bar("BC_PCT", "BC%", False), config=GRAPH_CFG)])])
     return html.Div([
         html.Div(style=CARD, children=[html.H3(f"Operator Rankings (Top {topn})",
                  style={"margin": "0 0 8px 0", "color": COLORS["navy"]}), table]), bars])
