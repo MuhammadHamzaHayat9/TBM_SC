@@ -51,8 +51,9 @@ trend = pd.concat([weekly(prod, bc, ac, False), weekly(prod, bc, ac, True)], ign
 for c in ["BC_COUNT", "AC_COUNT"]:
     trend[c] = trend[c].fillna(0)
 trend["SCRAP_LBS"] = 0.0
-trend["BC_PCT"] = (trend["BC_COUNT"] / trend["TIRES_BUILT"].replace(0, pd.NA) * 100).astype(float).round(3)
-trend["AC_PCT"] = (trend["AC_COUNT"] / trend["TIRES_BUILT"].replace(0, pd.NA) * 100).astype(float).round(3)
+_den = trend["TIRES_BUILT"].replace(0, float("nan"))
+trend["BC_PCT"] = (trend["BC_COUNT"] / _den * 100).round(3)
+trend["AC_PCT"] = (trend["AC_COUNT"] / _den * 100).round(3)
 trend["SCRAP_PCT"] = 0.0
 trend["WEEK_LABEL"] = (trend["PROD_YEAR"].astype("Int64").astype(str)
                        + "-W" + trend["PROD_WEEK"].astype("Int64").astype(str).str.zfill(2))
