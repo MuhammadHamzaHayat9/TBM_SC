@@ -49,8 +49,9 @@ agg = (uni.groupby(["BU", "CREW", "PROD_YEAR", "PROD_WEEK"], dropna=False)
                RFT_COUNT=("IS_RFT", "sum"),
                REPAIR_COUNT=("IS_REPAIR", "sum"))
           .reset_index())
-agg["RFT_PCT"]    = (agg["RFT_COUNT"]    / agg["TIRES_TESTED"].replace(0, pd.NA) * 100).astype(float).round(3)
-agg["REPAIR_PCT"] = (agg["REPAIR_COUNT"] / agg["TIRES_TESTED"].replace(0, pd.NA) * 100).astype(float).round(3)
+_den = agg["TIRES_TESTED"].replace(0, float("nan"))
+agg["RFT_PCT"]    = (agg["RFT_COUNT"]    / _den * 100).round(3)
+agg["REPAIR_PCT"] = (agg["REPAIR_COUNT"] / _den * 100).round(3)
 
 print(f"agg_uniformity_fin rows: {len(agg):,}")
 dataiku.Dataset("agg_uniformity_fin").write_with_schema(agg)

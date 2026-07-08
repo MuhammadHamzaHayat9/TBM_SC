@@ -74,10 +74,11 @@ agg = (op_base.merge(bc_agg, on="OP_ID", how="left").merge(ac_agg, on="OP_ID", h
 for c in ["BC_COUNT", "AC_COUNT", "SCRAP_LBS", "UNI_TESTED", "UNI_RFT"]:
     agg[c] = agg[c].fillna(0)
 
-agg["BC_PCT"]    = (agg["BC_COUNT"] / agg["TIRES_BUILT"].replace(0, pd.NA) * 100).astype(float).round(3)
-agg["AC_PCT"]    = (agg["AC_COUNT"] / agg["TIRES_BUILT"].replace(0, pd.NA) * 100).astype(float).round(3)
-agg["SCRAP_PCT"] = (agg["SCRAP_LBS"] / agg["TIRES_BUILT"].replace(0, pd.NA)).astype(float).round(3)
-agg["RFT_PCT"]   = (agg["UNI_RFT"] / agg["UNI_TESTED"].replace(0, pd.NA) * 100).astype(float).round(3)
+_den = agg["TIRES_BUILT"].replace(0, float("nan"))
+agg["BC_PCT"]    = (agg["BC_COUNT"] / _den * 100).round(3)
+agg["AC_PCT"]    = (agg["AC_COUNT"] / _den * 100).round(3)
+agg["SCRAP_PCT"] = (agg["SCRAP_LBS"] / _den).round(3)
+agg["RFT_PCT"]   = (agg["UNI_RFT"] / agg["UNI_TESTED"].replace(0, float("nan")) * 100).round(3)
 
 MIN_TIRES = 100
 agg["RANKABLE"] = agg["TIRES_BUILT"] >= MIN_TIRES
