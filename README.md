@@ -12,6 +12,25 @@ Dataiku project that turns raw production / quality data into a **Dash webapp** 
 > 🙂/😐/☹️ status face. Reading the aggregates (not the raw million-row facts)
 > also keeps the webapp backend well within memory.
 
+## 🔀 1st Step / 2nd Step toggle
+
+A **Step toggle** switches the whole ScoreCard between **1st Step (Confection)**
+and **2nd Step (Finishing)**, like the old app's two score-card tabs:
+
+- **Before / After Cure donuts** split immediately by the `CQ_RELATES_TO`
+  (`Confection` / `Finishing`) field already present in `agg_donut_bc/ac` — no
+  new data needed.
+- **Tires / Uniformity / Leaderboard / Trend** for the 2nd step read the
+  finishing aggregates below. Build these recipes to populate the 2nd-step
+  tiles; until then those tiles show "No data" and the finishing donuts still work.
+
+| 2nd-step recipe | Output | Source |
+|---|---|---|
+| `compute_fact_second_step.py` | `fact_second_step` | `second_step_prod` |
+| `compute_agg_uniformity_fin.py` | `agg_uniformity_fin` | `uniformity_breakdown` (FINISHING_OPERATOR_ID) |
+| `compute_agg_top_performers_fin.py` | `agg_top_performers_fin` | fact_second_step + finishing CQs + scrap + uniformity |
+| `compute_agg_weekly_trend_fin.py` | `agg_weekly_trend_fin` | fact_second_step + finishing CQs |
+
 ## 🖥️ Webapp tabs
 
 | Tab | Reads | Shows |

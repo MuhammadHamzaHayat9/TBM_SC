@@ -49,6 +49,7 @@ def norm_op_series(s):
     txt = txt.str.zfill(6)
     return txt.where(s.notna(), None)
 
+# --- 1st Step (Confection) aggregates ---
 TOP   = load("agg_top_performers")
 UNI   = load("agg_uniformity")
 DBC   = load("agg_donut_bc")
@@ -56,16 +57,30 @@ DAC   = load("agg_donut_ac")
 DSC   = load("agg_donut_scrap")
 TREND = load("agg_weekly_trend")
 CV    = load("fact_counter_verifier")
+# --- 2nd Step (Finishing) aggregates (built by compute_*_fin recipes; may be empty) ---
+TOP_FIN   = load("agg_top_performers_fin")
+UNI_FIN   = load("agg_uniformity_fin")
+TREND_FIN = load("agg_weekly_trend_fin")
 
-if not TOP.empty and "OP_ID" in TOP.columns:
-    TOP["OP_ID"] = norm_op_series(TOP["OP_ID"])
-if not CV.empty and "OP_ID" in CV.columns:
-    CV["OP_ID"] = norm_op_series(CV["OP_ID"])
+for _df in (TOP, TOP_FIN, CV):
+    if not _df.empty and "OP_ID" in _df.columns:
+        _df["OP_ID"] = norm_op_series(_df["OP_ID"])
+
+# Step registry: which datasets + CQ_RELATES_TO value drive each step
+STEP_DS = {
+    "1": {"label": "1st Step — Confection", "relates": "Confection",
+          "top": TOP,     "uni": UNI,     "trend": TREND},
+    "2": {"label": "2nd Step — Finishing",  "relates": "Finishing",
+          "top": TOP_FIN, "uni": UNI_FIN, "trend": TREND_FIN},
+}
+def sds(step):
+    return STEP_DS.get(str(step) if step else "1", STEP_DS["1"])
 
 OP_NAME = {}
-if not TOP.empty and {"OP_ID", "OPERATOR_NAME"}.issubset(TOP.columns):
-    OP_NAME = (TOP.dropna(subset=["OPERATOR_NAME"]).drop_duplicates("OP_ID")
-                  .set_index("OP_ID")["OPERATOR_NAME"].to_dict())
+for _t in (TOP, TOP_FIN):
+    if not _t.empty and {"OP_ID", "OPERATOR_NAME"}.issubset(_t.columns):
+        OP_NAME.update(_t.dropna(subset=["OPERATOR_NAME"]).drop_duplicates("OP_ID")
+                         .set_index("OP_ID")["OPERATOR_NAME"].to_dict())
 
 def _uniq(df, col, cast=None):
     if df.empty or col not in df.columns:
@@ -79,9 +94,10 @@ def _uniq(df, col, cast=None):
         vals = out
     return sorted(set(vals))
 
-BU_OPTIONS   = _uniq(TOP, "BU")
-CREW_OPTIONS = _uniq(TOP, "CREW", int)
-WEEK_OPTIONS = sorted(set(_uniq(TREND, "PROD_WEEK", int)) | set(_uniq(CV, "WEEK", int)))
+BU_OPTIONS   = sorted(set(_uniq(TOP, "BU")) | set(_uniq(TOP_FIN, "BU")))
+CREW_OPTIONS = sorted(set(_uniq(TOP, "CREW", int)) | set(_uniq(TOP_FIN, "CREW", int)))
+WEEK_OPTIONS = sorted(set(_uniq(TREND, "PROD_WEEK", int)) | set(_uniq(TREND_FIN, "PROD_WEEK", int))
+                      | set(_uniq(CV, "WEEK", int)))
 REFRESH = datetime.datetime.now().strftime("%m/%d/%Y %I:%M %p")
 
 # ============================================================
@@ -197,6 +213,13 @@ def cat_counts(df, dim_cols, value_col, cap=6):
             g = pd.concat([g, pd.Series({"Other": other})])
     return list(g.index), list(g.values)
 
+def by_relates(df, relates):
+    """Keep only rows whose CQ_RELATES_TO matches the step; no-op if the split isn't present."""
+    if df.empty or "CQ_RELATES_TO" not in df.columns or not relates:
+        return df
+    sub = df[df["CQ_RELATES_TO"].astype("string").str.strip().str.casefold() == relates.casefold()]
+    return sub if not sub.empty else df   # fall back to all if this step has no tagged rows
+
 def op_chip_link(op_id, name, color):
     return html.A(name, id={"type": "op-link", "index": str(op_id)}, n_clicks=0,
                   style={"color": color, "cursor": "pointer", "fontWeight": "700",
@@ -226,9 +249,10 @@ def metric_card(face_emoji, title, figure):
 # ============================================================
 # 5. TAB: SCORECARD  (Power BI layout)
 # ============================================================
-def page_scorecard(bus, crews, weeks, op_id):
-    t = filt(TOP, bus, crews, op_id=op_id)
-    u = filt(UNI, bus, crews, weeks)
+def page_scorecard(step, bus, crews, weeks, op_id):
+    cfg = sds(step); relates = cfg["relates"]
+    t = filt(cfg["top"], bus, crews, op_id=op_id)
+    u = filt(cfg["uni"], bus, crews, weeks)
 
     def s(col):
         return float(t[col].sum()) if (not t.empty and col in t.columns) else 0.0
@@ -243,12 +267,14 @@ def page_scorecard(bus, crews, weeks, op_id):
     ac_pct   = (ac / tires * 100) if tires else 0
     rft_pct  = (uni_rft / uni_tested * 100) if uni_tested else 0
 
-    # ---- Bottom donuts / gauge ----
+    # ---- Bottom donuts / gauge (CQ donuts split by step via CQ_RELATES_TO) ----
     cv_fig = donut(["OK", "Leak"], [cv_ok, cv_leaks], [COLORS["good"], COLORS["danger"]],
                    center_text=f"{cv_pct:.1f}%", center_color=COLORS["danger"] if cv_pct > 8 else COLORS["good"])
-    bl, bv = cat_counts(filt(DBC, bus, crews, drop_bu_na=True), ["CQ_TYPE_TIER", "CQ_DESCRIPTION", "CQ_CODE_STR"], "CQ_COUNT")
+    dbc_s = by_relates(filt(DBC, bus, crews, drop_bu_na=True), relates)
+    dac_s = by_relates(filt(DAC, bus, crews, drop_bu_na=True), relates)
+    bl, bv = cat_counts(dbc_s, ["CQ_TYPE_TIER", "CQ_DESCRIPTION", "CQ_CODE_STR"], "CQ_COUNT")
     bc_fig = donut(bl, bv, CAT, center_text=f"{bc_pct:.2f}%", center_color=COLORS["danger"])
-    al, av = cat_counts(filt(DAC, bus, crews, drop_bu_na=True), ["CQ_TYPE_TIER", "CQ_DESCRIPTION", "CQ_CODE_STR"], "CQ_COUNT")
+    al, av = cat_counts(dac_s, ["CQ_TYPE_TIER", "CQ_DESCRIPTION", "CQ_CODE_STR"], "CQ_COUNT")
     ac_fig = donut(al, av, CAT, center_text=f"{ac_pct:.2f}%", center_color=COLORS["danger"])
     uni_fig = gauge(rft_pct)
 
@@ -266,21 +292,21 @@ def page_scorecard(bus, crews, weeks, op_id):
         html.Div(style=CARD, children=[
             html.H4("Top Performers — NC Scrap", style={"margin": "0 0 8px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
-            nc_scrap_panel(bus, crews, op_id)]),
+            nc_scrap_panel(step, bus, crews, op_id)]),
         html.Div(style=CARD, children=[
             html.H4("Previous Weeks Results", style={"margin": "0 0 4px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
-            dcc.Graph(figure=trend_fig(bus, weeks), config={"displayModeBar": False})]),
+            dcc.Graph(figure=trend_fig(step, bus, weeks), config={"displayModeBar": False})]),
         html.Div(style=CARD, children=[
             html.H4("Total Quality — Top Performers", style={"margin": "0 0 8px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
-            quality_panel(bus, crews, op_id),
+            quality_panel(step, bus, crews, op_id),
             html.Div(nav_button("Rankings ▸", "rank"), style={"textAlign": "center", "marginTop": "10px"})]),
     ])
     return html.Div([top_row, bottom])
 
-def quality_panel(bus, crews, op_id):
-    d = filt(TOP, bus, crews, op_id=op_id)
+def quality_panel(step, bus, crews, op_id):
+    d = filt(sds(step)["top"], bus, crews, op_id=op_id)
     if d.empty:
         return html.Div("No data", style={"color": COLORS["muted"]})
     if "RANKABLE" in d.columns:
@@ -301,8 +327,8 @@ def quality_panel(bus, crews, op_id):
         ]))
     return html.Div(items, style={"maxHeight": "300px", "overflowY": "auto"})
 
-def nc_scrap_panel(bus, crews, op_id):
-    d = filt(TOP, bus, crews, op_id=op_id)
+def nc_scrap_panel(step, bus, crews, op_id):
+    d = filt(sds(step)["top"], bus, crews, op_id=op_id)
     if d.empty or "SCRAP_LBS" not in d.columns:
         return html.Div("No data", style={"color": COLORS["muted"]})
     d = d.dropna(subset=["OPERATOR_NAME"]).sort_values("SCRAP_LBS", ascending=False).head(4)
@@ -321,10 +347,12 @@ def nc_scrap_panel(bus, crews, op_id):
         ]))
     return html.Div(items, style={"maxHeight": "300px", "overflowY": "auto"})
 
-def trend_fig(bus, weeks):
-    if TREND.empty:
+def trend_fig(step, bus, weeks):
+    cfg = sds(step)
+    TR = cfg["trend"]
+    if TR.empty:
         return empty_fig("No trend data", height=330)
-    d = TREND.copy()
+    d = TR.copy()
     if bus:
         d = d[d["BU"].isin(bus)]
     else:
@@ -338,8 +366,8 @@ def trend_fig(bus, weeks):
         TIRES=("TIRES_BUILT", "sum"), BC=("BC_COUNT", "sum"), AC=("AC_COUNT", "sum")).reset_index()
     g["BC_PCT"] = (g["BC"] / g["TIRES"].replace(0, float("nan")) * 100).round(3)
     g["AC_PCT"] = (g["AC"] / g["TIRES"].replace(0, float("nan")) * 100).round(3)
-    # RFT% line from agg_uniformity
-    ug = filt(UNI, bus, None, weeks)
+    # RFT% line from the step's uniformity aggregate
+    ug = filt(cfg["uni"], bus, None, weeks)
     if not ug.empty and {"RFT_COUNT", "TIRES_TESTED"}.issubset(ug.columns):
         uw = ug.groupby(keys, dropna=False).agg(R=("RFT_COUNT", "sum"), T=("TIRES_TESTED", "sum")).reset_index()
         uw["RFT_PCT"] = (uw["R"] / uw["T"].replace(0, float("nan")) * 100).round(2)
@@ -442,10 +470,10 @@ def page_counter_verifier(bus, crews, weeks, op_id):
 # ============================================================
 # 7. TAB: RANKINGS
 # ============================================================
-def page_rankings(bus, crews, op_id, topn):
-    d = filt(TOP, bus, crews, op_id=op_id)
+def page_rankings(step, bus, crews, op_id, topn):
+    d = filt(sds(step)["top"], bus, crews, op_id=op_id)
     if d.empty:
-        return html.Div(style=CARD, children=[html.H3("No ranking data", style={"color": COLORS["muted"]})])
+        return html.Div(style=CARD, children=[html.H3("No ranking data for this step", style={"color": COLORS["muted"]})])
     d = d.dropna(subset=["OPERATOR_NAME"]) if "OPERATOR_NAME" in d.columns else d
     if "QUALITY_SCORE" in d.columns:
         d = d.sort_values("QUALITY_SCORE")
@@ -520,6 +548,17 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "12px",
     html.Div("Week filter applies to trends, Uniformity and Counter Verifier; operator KPIs and CQ donuts are period totals.",
              style={"fontSize": "11px", "color": COLORS["muted"], "margin": "4px 8px"}),
 
+    # Step toggle (1st Step / 2nd Step)
+    html.Div(style={"margin": "6px 8px"}, children=[
+        dcc.RadioItems(id="step", value="1", inline=True,
+                       options=[{"label": " 1st Step — Confection ", "value": "1"},
+                                {"label": " 2nd Step — Finishing ", "value": "2"}],
+                       labelStyle={"backgroundColor": COLORS["card"], "border": f"2px solid {COLORS['btn']}",
+                                   "borderRadius": "6px", "padding": "8px 22px", "marginRight": "10px",
+                                   "cursor": "pointer", "fontWeight": "700", "color": COLORS["btn"]},
+                       inputStyle={"marginRight": "6px"}),
+    ]),
+
     dcc.Tabs(id="tabs", value="score", children=[
         dcc.Tab(label="📋 ScoreCard", value="score"),
         dcc.Tab(label="💧 Counter Verifier", value="cv"),
@@ -570,13 +609,13 @@ def render_op_chip(op_id):
 
 @app.callback(
     Output("content", "children"),
-    Input("tabs", "value"),
+    Input("step", "value"), Input("tabs", "value"),
     Input("f-bu", "value"), Input("f-crew", "value"),
     Input("f-week", "value"), Input("f-op", "data"), Input("f-topn", "value"),
 )
-def render(tab, bus, crews, weeks, op_id, topn):
+def render(step, tab, bus, crews, weeks, op_id, topn):
     if tab == "cv":
         return page_counter_verifier(bus, crews, weeks, op_id)
     if tab == "rank":
-        return page_rankings(bus, crews, op_id, topn or 10)
-    return page_scorecard(bus, crews, weeks, op_id)
+        return page_rankings(step, bus, crews, op_id, topn or 10)
+    return page_scorecard(step, bus, crews, weeks, op_id)
