@@ -63,53 +63,58 @@ DOMAINS = {
 }
 
 # ============================================================
-# 1. LOAD DATASETS (cached once; graceful fallback if missing)
+# 1. LOAD DATASETS  (LAZY — a dataset is read only when a page needs it)
 # ============================================================
-_CACHE = {}
+# The webapp backend has a limited memory / startup budget, so we never load
+# every dataset up front. Each dataset is read + normalised at most once, the
+# first time some page asks for it, then cached. Only the Confection
+# production table is touched at startup, purely to build the filter dropdowns.
+_RAW  = {}   # name -> raw dataframe (columns upper-cased)
+_NORM = {}   # name -> normalised dataframe (OP_ID zero-padded, de-duped)
 
+def _load_raw(name):
+    if name not in _RAW:
+        try:
+            df = dataiku.Dataset(name).get_dataframe()
+            df.columns = [c.upper() for c in df.columns]
+        except Exception as e:
+            print(f"[warn] dataset '{name}' not available: {e}")
+            df = pd.DataFrame()
+        _RAW[name] = df
+    return _RAW[name]
+
+# keep a backward-compatible alias
 def load(name):
-    """Load a Dataiku dataset once, upper-case columns, tolerate absence."""
-    if name in _CACHE:
-        return _CACHE[name]
-    try:
-        df = dataiku.Dataset(name).get_dataframe()
-        df.columns = [c.upper() for c in df.columns]
-    except Exception as e:
-        print(f"[warn] dataset '{name}' not available: {e}")
-        df = pd.DataFrame()
-    _CACHE[name] = df
-    return df
+    return _load_raw(name)
 
-def norm_op(x):
-    if pd.isna(x): return None
-    try:    return str(int(float(x))).zfill(6)
-    except: return str(x).strip().zfill(6)
+def _norm_op_series(s):
+    """Vectorised OP_ID normaliser: zero-pad to 6 chars, strip trailing '.0'."""
+    txt = s.astype("string").str.strip()
+    txt = txt.str.replace(r"\.0+$", "", regex=True)   # '12345.0' -> '12345'
+    txt = txt.str.zfill(6)
+    return txt.where(s.notna(), None)
+
+def _load_norm(name):
+    """Load + normalise a dataset once (OP_ID + uniformity de-dupe), then cache."""
+    if name not in _NORM:
+        df = _load_raw(name)
+        if not df.empty:
+            df = df.copy()
+            if "OP_ID" in df.columns:
+                df["OP_ID"] = _norm_op_series(df["OP_ID"])
+            # uniformity arrives one row per test — keep one row per barcode
+            if {"BARCODE", "TEST_DATE"}.issubset(df.columns):
+                df = (df.sort_values(["BARCODE", "TEST_DATE"])
+                        .drop_duplicates("BARCODE", keep="first"))
+        _NORM[name] = df
+    return _NORM[name]
 
 def get(domain, key):
-    """Return the (normalised) dataframe for a domain/role, e.g. get('Confection','bc')."""
-    df = load(DOMAINS[domain][key])
-    if not df.empty and "OP_ID" in df.columns:
-        if df["OP_ID"].dtype == object and df["OP_ID"].str.len().eq(6).all():
-            return df  # already normalised
-        df = df.copy()
-        df["OP_ID"] = df["OP_ID"].apply(norm_op)
-    return df
+    """Return the normalised dataframe for a domain/role, e.g. get('Confection','bc')."""
+    return _load_norm(DOMAINS[domain][key])
 
-# Pre-normalise everything we know about so OP_ID joins are consistent.
-_ALL_KEYS = ("prod", "bc", "ac", "cv", "uni", "scrap", "top")
-for _dom in DOMAINS:
-    for _k in _ALL_KEYS:
-        _df = load(DOMAINS[_dom][_k])
-        if not _df.empty and "OP_ID" in _df.columns:
-            _df["OP_ID"] = _df["OP_ID"].apply(norm_op)
-
-# De-dupe uniformity to one row per barcode (avoid double counting re-tests)
-_UNI = load(DOMAINS["Confection"]["uni"])
-if not _UNI.empty and {"BARCODE", "TEST_DATE"}.issubset(_UNI.columns):
-    _UNI.sort_values(["BARCODE", "TEST_DATE"], inplace=True)
-    _UNI.drop_duplicates("BARCODE", keep="first", inplace=True)
-
-# Operator display names + filter option lists (built off Confection production)
+# Operator display names + filter option lists (built off Confection production).
+# This is the ONLY dataset read at startup.
 _PROD = get("Confection", "prod")
 OP_NAME = {}
 if not _PROD.empty and "OPERATOR_NAME" in _PROD.columns:
