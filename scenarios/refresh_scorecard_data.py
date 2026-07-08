@@ -44,16 +44,16 @@ FACTS = [
     "fact_nc_scrap", "fact_uniformity",
 ]
 
-# Datasets the webapp reads directly.
+# Datasets the webapp ACTIVELY reads (v5+ reads operator x week + donuts + CV).
+# The legacy period aggregates (agg_top_performers, agg_kpi_summary/agg_weekly_trend,
+# agg_uniformity, and their _fin twins) were superseded by agg_op_week and load
+# many big facts at once — rebuilding them here OOMs. The webapp only falls back
+# to them if agg_op_week is missing, so we don't refresh them in the scenario.
 WEBAPP_DATASETS = [
     "fact_counter_verifier",
-    "agg_top_performers", "agg_uniformity",
     "agg_donut_bc", "agg_donut_ac", "agg_donut_scrap",
-    "agg_weekly_trend",
-    # operator x week building blocks (drive the week-aware KPIs / leaderboards)
+    # operator x week building blocks (drive KPIs / leaderboards / rankings / trend)
     "agg_op_week", "agg_op_week_fin",
-    # 2nd Step / Finishing
-    "agg_top_performers_fin", "agg_uniformity_fin", "agg_weekly_trend_fin",
 ]
 
 failures = []
