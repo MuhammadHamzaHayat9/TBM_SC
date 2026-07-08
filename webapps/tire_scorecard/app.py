@@ -596,6 +596,8 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "12px",
                        "fontWeight": "800"}),
         html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px",
                         "justifyContent": "flex-end"}, children=[
+            dcc.Loading(type="circle", children=html.Span(id="refresh-status",
+                        style={"fontSize": "11px", "color": COLORS["good"], "fontWeight": "700"})),
             html.Button("🔄 Refresh data", id="btn-refresh", n_clicks=0,
                         style={"backgroundColor": COLORS["btn"], "color": "white", "border": "none",
                                "borderRadius": "6px", "padding": "7px 14px", "cursor": "pointer",
@@ -670,12 +672,14 @@ def nav_tab(clicks):
 @app.callback(
     Output("refresh-token", "data"),
     Output("last-refresh", "children"),
+    Output("refresh-status", "children"),
     Input("btn-refresh", "n_clicks"),
     prevent_initial_call=True,
 )
 def do_refresh(n):
     load_all()   # re-read every dataset from Dataiku, rebuild lookups
-    return (n or 0), f"Last Refresh: {REFRESH}"
+    stamp = datetime.datetime.now().strftime("%I:%M:%S %p")
+    return (n or 0), f"Last Refresh: {REFRESH}", f"✓ Data refreshed at {stamp}"
 
 @app.callback(Output("f-op-display", "children"), Input("f-op", "data"))
 def render_op_chip(op_id):
