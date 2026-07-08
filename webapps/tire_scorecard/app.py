@@ -51,12 +51,13 @@ DOMAINS = {
     "Finishing": {
         "label":  "Finishing — 2nd Step",
         "tires":  "TIRES_BUILT",
-        # Point these at your real 2nd-Step datasets; missing ones show "No data".
+        # 2nd-Step datasets built by the compute_fact_fin_* / compute_fact_second_step
+        # recipes. Any dataset not built yet simply renders "No data".
         "prod":   "fact_second_step",
         "bc":     "fact_fin_bc",
         "ac":     "fact_fin_ac",
         "cv":     "fact_fin_counter_verifier",
-        "uni":    "fact_uniformity",
+        "uni":    "fact_uniformity_fin",   # uniformity keyed on the finishing operator
         "scrap":  "fact_nc_scrap",
         "top":    "agg_top_performers_fin",
     },
@@ -360,9 +361,9 @@ def weekly_trend_fig(prod, bc, ac, uni, tcol):
     t = p_w.merge(bc_w, on=keys, how="left").merge(ac_w, on=keys, how="left").merge(uni_w, on=keys, how="left")
     for c in ["BC_COUNT", "AC_COUNT", "UNI_TESTED", "UNI_RFT"]:
         if c in t.columns: t[c] = t[c].fillna(0)
-    t["BC_PCT"]  = (t.get("BC_COUNT", 0) / t[tcol].replace(0, pd.NA) * 100).round(3)
-    t["AC_PCT"]  = (t.get("AC_COUNT", 0) / t[tcol].replace(0, pd.NA) * 100).round(3)
-    t["RFT_PCT"] = (t.get("UNI_RFT", 0) / t.get("UNI_TESTED", pd.Series(0)).replace(0, pd.NA) * 100).round(3)
+    t["BC_PCT"]  = (t.get("BC_COUNT", 0) / t[tcol].replace(0, float("nan")) * 100).round(3)
+    t["AC_PCT"]  = (t.get("AC_COUNT", 0) / t[tcol].replace(0, float("nan")) * 100).round(3)
+    t["RFT_PCT"] = (t.get("UNI_RFT", 0) / t.get("UNI_TESTED", pd.Series(0)).replace(0, float("nan")) * 100).round(3)
     t["WEEK_LABEL"] = (t["PROD_YEAR"].astype("Int64").astype(str)
                        + "-W" + t["PROD_WEEK"].astype("Int64").astype(str).str.zfill(2))
     t = t.sort_values(keys)
@@ -417,7 +418,7 @@ def leaderboard_scrap(scrap):
               .agg(SCRAP_LBS=("OP_SCRAP_LBS_BY_TIRES", "sum"),
                    SHIFTS=("PROD_DATE", "nunique"))
               .reset_index())
-    g["NC_PER_SHIFT"] = (g["SCRAP_LBS"] / g["SHIFTS"].replace(0, pd.NA)).round(1)
+    g["NC_PER_SHIFT"] = (g["SCRAP_LBS"] / g["SHIFTS"].replace(0, float("nan"))).round(1)
     g = g.sort_values("SCRAP_LBS", ascending=False).head(10)
     rows = []
     for _, r in g.iterrows():
