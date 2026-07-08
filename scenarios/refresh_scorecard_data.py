@@ -41,6 +41,8 @@ WEBAPP_DATASETS = [
     "agg_top_performers", "agg_uniformity",
     "agg_donut_bc", "agg_donut_ac", "agg_donut_scrap",
     "agg_weekly_trend",
+    # operator x week building blocks (drive the week-aware KPIs / leaderboards)
+    "agg_op_week", "agg_op_week_fin",
     # 2nd Step / Finishing
     "agg_top_performers_fin", "agg_uniformity_fin", "agg_weekly_trend_fin",
 ]

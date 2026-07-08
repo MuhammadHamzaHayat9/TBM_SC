@@ -304,7 +304,7 @@ def metric_card(face_emoji, title, figure):
 # ============================================================
 # 5. TAB: SCORECARD  (Power BI layout)
 # ============================================================
-def page_scorecard(step, bus, crews, weeks, op_id):
+def page_scorecard(step, bus, crews, weeks, op_id, topn=10):
     cfg = sds(step); relates = cfg["relates"]
     t = op_rollup(step, bus, crews, weeks, op_id)
 
@@ -345,7 +345,7 @@ def page_scorecard(step, bus, crews, weeks, op_id):
         html.Div(style=CARD, children=[
             html.H4("Top Performers — NC Scrap", style={"margin": "0 0 8px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
-            nc_scrap_panel(step, bus, crews, weeks, op_id)]),
+            nc_scrap_panel(step, bus, crews, weeks, op_id, topn)]),
         html.Div(style=CARD, children=[
             html.H4("Previous Weeks Results", style={"margin": "0 0 4px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
@@ -353,12 +353,12 @@ def page_scorecard(step, bus, crews, weeks, op_id):
         html.Div(style=CARD, children=[
             html.H4("Total Quality — Top Performers", style={"margin": "0 0 8px 0", "textAlign": "center",
                     "color": COLORS["ink"]}),
-            quality_panel(step, bus, crews, weeks, op_id),
+            quality_panel(step, bus, crews, weeks, op_id, topn),
             html.Div(nav_button("Rankings ▸", "rank"), style={"textAlign": "center", "marginTop": "10px"})]),
     ])
     return html.Div([top_row, bottom])
 
-def quality_panel(step, bus, crews, weeks, op_id):
+def quality_panel(step, bus, crews, weeks, op_id, topn=6):
     d = op_rollup(step, bus, crews, weeks, op_id)
     if d.empty:
         return html.Div("No data", style={"color": COLORS["muted"]})
@@ -366,7 +366,7 @@ def quality_panel(step, bus, crews, weeks, op_id):
         d = d[d["RANKABLE"] == True]
     d = d.dropna(subset=["OPERATOR_NAME"]) if "OPERATOR_NAME" in d.columns else d
     sort_col = "QUALITY_SCORE" if "QUALITY_SCORE" in d.columns else "RANK"
-    d = d.sort_values(sort_col).head(6)
+    d = d.sort_values(sort_col).head(topn)
     items = []
     for _, r in d.iterrows():
         q = f"{r['QUALITY_SCORE']:.2f}%" if pd.notna(r.get("QUALITY_SCORE")) else "—"
@@ -380,11 +380,11 @@ def quality_panel(step, bus, crews, weeks, op_id):
         ]))
     return html.Div(items, style={"maxHeight": "300px", "overflowY": "auto"})
 
-def nc_scrap_panel(step, bus, crews, weeks, op_id):
+def nc_scrap_panel(step, bus, crews, weeks, op_id, topn=6):
     d = op_rollup(step, bus, crews, weeks, op_id)
     if d.empty or "SCRAP_LBS" not in d.columns:
         return html.Div("No data", style={"color": COLORS["muted"]})
-    d = d.dropna(subset=["OPERATOR_NAME"]).sort_values("SCRAP_LBS", ascending=False).head(4)
+    d = d.dropna(subset=["OPERATOR_NAME"]).sort_values("SCRAP_LBS", ascending=False).head(topn)
     items = []
     for _, r in d.iterrows():
         lbs = f"{r['SCRAP_LBS']:,.1f}" if pd.notna(r.get("SCRAP_LBS")) else "—"
@@ -596,6 +596,8 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "12px",
                        "fontWeight": "800"}),
         html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px",
                         "justifyContent": "flex-end"}, children=[
+            dcc.Loading(type="circle", children=html.Span(id="refresh-status",
+                        style={"fontSize": "11px", "color": COLORS["good"], "fontWeight": "700"})),
             html.Button("🔄 Refresh data", id="btn-refresh", n_clicks=0,
                         style={"backgroundColor": COLORS["btn"], "color": "white", "border": "none",
                                "borderRadius": "6px", "padding": "7px 14px", "cursor": "pointer",
@@ -612,7 +614,7 @@ app.layout = html.Div(style={"backgroundColor": COLORS["bg"], "padding": "12px",
             dcc.Dropdown(id="f-crew", options=[{"label": f"Crew {c}", "value": c} for c in CREW_OPTIONS], multi=True, placeholder="All Crews")]),
         html.Div(style={"flex": 1}, children=[html.Label("Week", style=FILT_LABEL),
             dcc.Dropdown(id="f-week", options=[{"label": f"W{w:02d}", "value": w} for w in WEEK_OPTIONS], multi=True, placeholder="All Weeks")]),
-        html.Div(style={"flex": 1}, children=[html.Label("Rankings Top N", style=FILT_LABEL),
+        html.Div(style={"flex": 1}, children=[html.Label("Top N (performers & rankings)", style=FILT_LABEL),
             dcc.Dropdown(id="f-topn", options=[{"label": f"Top {n}", "value": n} for n in (10, 15, 20, 25)], value=10, clearable=False)]),
     ]),
     html.Div("Filters (BU · Crew · Week · Operator) apply across every visual — KPIs, donuts, trend, "
@@ -670,12 +672,14 @@ def nav_tab(clicks):
 @app.callback(
     Output("refresh-token", "data"),
     Output("last-refresh", "children"),
+    Output("refresh-status", "children"),
     Input("btn-refresh", "n_clicks"),
     prevent_initial_call=True,
 )
 def do_refresh(n):
     load_all()   # re-read every dataset from Dataiku, rebuild lookups
-    return (n or 0), f"Last Refresh: {REFRESH}"
+    stamp = datetime.datetime.now().strftime("%I:%M:%S %p")
+    return (n or 0), f"Last Refresh: {REFRESH}", f"✓ Data refreshed at {stamp}"
 
 @app.callback(Output("f-op-display", "children"), Input("f-op", "data"))
 def render_op_chip(op_id):
@@ -701,4 +705,4 @@ def render(step, tab, bus, crews, weeks, op_id, topn, _tok):
         return page_counter_verifier(bus, crews, weeks, op_id)
     if tab == "rank":
         return page_rankings(step, bus, crews, weeks, op_id, topn or 10)
-    return page_scorecard(step, bus, crews, weeks, op_id)
+    return page_scorecard(step, bus, crews, weeks, op_id, topn or 10)
