@@ -306,6 +306,7 @@ def metric_card(face_emoji, title, figure):
 # ============================================================
 def page_scorecard(step, bus, crews, weeks, op_id, topn=10):
     cfg = sds(step); relates = cfg["relates"]
+    opwk_ok = cfg.get("opwk") is not None and not cfg["opwk"].empty
     t = op_rollup(step, bus, crews, weeks, op_id)
 
     def s(col):
@@ -356,7 +357,17 @@ def page_scorecard(step, bus, crews, weeks, op_id, topn=10):
             quality_panel(step, bus, crews, weeks, op_id, topn),
             html.Div(nav_button("Rankings ▸", "rank"), style={"textAlign": "center", "marginTop": "10px"})]),
     ])
-    return html.Div([top_row, bottom])
+    banner = []
+    if not opwk_ok:
+        ds_name = "agg_op_week" if str(step) == "1" else "agg_op_week_fin"
+        banner = [html.Div(
+            f"⚠️ '{ds_name}' isn't built yet — the leaderboards & KPIs show PERIOD "
+            f"totals and won't change with the Week filter. Build {ds_name} and hit "
+            f"🔄 Refresh to enable week-level filtering.",
+            style={"backgroundColor": "#FFF4D6", "color": "#7A5B00", "border": "1px solid #E7C65B",
+                   "borderRadius": "8px", "padding": "8px 12px", "margin": "0 6px 8px",
+                   "fontSize": "12px", "fontWeight": "600"})]
+    return html.Div(banner + [top_row, bottom])
 
 def quality_panel(step, bus, crews, weeks, op_id, topn=6):
     d = op_rollup(step, bus, crews, weeks, op_id)
