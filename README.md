@@ -39,11 +39,15 @@ and **2nd Step (Finishing)**, like the old app's two score-card tabs:
 | **Counter Verifier** | `fact_counter_verifier` | Leak % KPIs, leaks-by-station donut, weekly leak-% trend, highest leak-rate operators |
 | **Rankings** | `agg_top_performers` | Full operator ranking table + Top-N bar charts (RFT%, AC%, BC%) |
 
-Filters: **BU, Crew, Week, Operator**. Click any operator name on a leaderboard
-or ranking to drill the whole app to that operator. The week filter applies to
-the weekly trends, Uniformity, and Counter Verifier; the operator KPI cards and
-CQ donuts are period totals (the `agg_donut_*` and `agg_top_performers`
-datasets are not week-grained).
+Filters: **BU, Crew, Week, Operator** — these apply across **every** visual
+(KPI cards, donuts, trend, leaderboards, rankings). Click any operator name to
+drill the whole app to that operator.
+
+Week-aware everywhere is powered by two operator×week aggregates,
+`agg_op_week` / `agg_op_week_fin` (raw counts per operator per week); the app
+rolls them up over the selected filters and recomputes percentages, the
+quality score, and ranks live. The `agg_donut_*` datasets also carry
+`PROD_WEEK` so the CQ donuts filter by week too.
 
 ## 📡 Datasets the webapp reads
 
