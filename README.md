@@ -17,11 +17,18 @@ webapps/
 python_recipes/
   compute_dim_operator.py           # Dimension: operator master (HR + BU/Crew)
   compute_fact_first_step.py        # Fact: tires built per operator/day/TBM
-  compute_fact_conf_bc.py           # Fact: Before-Cure CQ events
-  compute_fact_conf_ac.py           # Fact: After-Cure CQ events
-  compute_fact_counter_verifier.py  # Fact: Counter Verifier (C1P) leak results
+  compute_fact_conf_bc.py           # Fact: Before-Cure CQ events (Confection)
+  compute_fact_conf_ac.py           # Fact: After-Cure CQ events (Confection)
+  compute_fact_counter_verifier.py  # Fact: Counter Verifier (C1P) leak results (Confection)
   compute_fact_nc_scrap.py          # Fact: NC scrap lbs per operator/day/TBM
-  compute_fact_uniformity.py        # Fact: per-tire uniformity test (IRF4 / RFT)
+  compute_fact_uniformity.py        # Fact: per-tire uniformity test, confection-keyed (IRF4 / RFT)
+  # --- Finishing / 2nd Step (mirror the Confection recipes) ---
+  compute_fact_second_step.py       # Fact: 2nd-step tires built per operator/day/TBM
+  compute_fact_fin_bc.py            # Fact: Before-Cure CQ events (Finishing)
+  compute_fact_fin_ac.py            # Fact: After-Cure CQ events (Finishing)
+  compute_fact_fin_counter_verifier.py # Fact: Counter Verifier (C1P) leak results (Finishing)
+  compute_fact_uniformity_fin.py    # Fact: per-tire uniformity test, finishing-keyed
+  compute_agg_top_performers_fin.py # Aggregate: 2nd-step operator leaderboard
   compute_agg_kpi_summary.py        # Aggregate: BU x Crew x Week KPIs
   compute_agg_donut_bc.py           # Aggregate: BC donut data
   compute_agg_donut_ac.py           # Aggregate: AC donut data
@@ -85,7 +92,21 @@ The webapp reads the following Dataiku datasets at runtime:
 | `fact_nc_scrap` | NC scrap lbs per operator/day/TBM |
 | `agg_top_performers` | Operator leaderboard scores |
 
-**Finishing domain (optional):** point `DOMAINS["Finishing"]` in `app.py` at the
-parallel 2nd-Step datasets — `fact_second_step`, `fact_fin_bc`, `fact_fin_ac`,
-`fact_fin_counter_verifier`, `agg_top_performers_fin`. Until they exist, the
-Finishing pages render gracefully with "No data".
+### Finishing / 2nd-Step domain
+
+The Finishing pages are driven by the `compute_fact_fin_*` /
+`compute_fact_second_step` / `compute_agg_top_performers_fin` recipes, which
+mirror the Confection recipes. Each recipe reads a 2nd-step **source** dataset,
+declared as a `SRC = "..."` constant at the top — confirm these match your
+Dataiku project (defaults follow the Confection naming convention):
+
+| Finishing output | Source dataset (`SRC`) | Mirrors |
+|---|---|---|
+| `fact_second_step` | `second_step_prod` | `fact_first_step` |
+| `fact_fin_bc` | `fin_bc_grq2` | `fact_conf_bc` |
+| `fact_fin_ac` | `fin_ac_grq2` | `fact_conf_ac` |
+| `fact_fin_counter_verifier` | `fin_counter_verifier` | `fact_counter_verifier` |
+| `fact_uniformity_fin` | `uniformity_breakdown` (finishing-keyed) | `fact_uniformity` |
+| `agg_top_performers_fin` | the four facts above | `agg_top_performers` |
+
+Until these datasets are built, the Finishing pages render gracefully with "No data".
