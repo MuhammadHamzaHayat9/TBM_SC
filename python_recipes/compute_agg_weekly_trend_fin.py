@@ -12,11 +12,21 @@ webapp reads agg_weekly_trend.
 import dataiku
 import pandas as pd
 
-prod = dataiku.Dataset("fact_second_step").get_dataframe()
-bc   = dataiku.Dataset("fact_conf_bc").get_dataframe()
-ac   = dataiku.Dataset("fact_conf_ac").get_dataframe()
-for df in (prod, bc, ac):
+def read(name, cols):
+    """Read only the needed columns (keeps the recipe memory-safe)."""
+    ds = dataiku.Dataset(name)
+    try:
+        df = ds.get_dataframe(columns=cols)
+    except Exception:
+        df = ds.get_dataframe()
+        want = {c.upper() for c in cols}
+        df = df[[c for c in df.columns if c.upper() in want]]
     df.columns = [c.upper() for c in df.columns]
+    return df
+
+prod = read("fact_second_step", ["BU", "PROD_YEAR", "PROD_WEEK", "TIRES_BUILT"])
+bc   = read("fact_conf_bc", ["BU", "PROD_YEAR", "PROD_WEEK", "CQ_CODE_STR", "CQ_RELATES_TO"])
+ac   = read("fact_conf_ac", ["BU", "PROD_YEAR", "PROD_WEEK", "CQ_CODE_STR", "CQ_RELATES_TO"])
 
 def fin_only(df):
     if "CQ_RELATES_TO" in df.columns:
