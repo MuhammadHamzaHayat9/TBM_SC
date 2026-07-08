@@ -2,11 +2,15 @@
 
 Dataiku project that turns raw production / quality data into a **Dash webapp** scorecard — a Power BI replacement for tire-building operator quality monitoring.
 
-> **v4 — reads the pre-computed aggregates.** `webapps/tire_scorecard/app.py`
-> reads the small `agg_*` datasets (a few hundred to a few thousand rows each)
-> plus `fact_counter_verifier`, instead of the raw multi-million-row fact
-> tables. This keeps the webapp backend well within memory (earlier versions
-> that eagerly loaded the big facts were being killed at startup).
+> **v5 — Power BI look & feel.** `webapps/tire_scorecard/app.py` reads the
+> small `agg_*` datasets (a few hundred to a few thousand rows each) plus
+> `fact_counter_verifier`, and lays them out to mirror the "Operator Quality
+> Score Card" Power BI report: centered title, a "Previous Weeks Results"
+> combo chart (BC%/AC% bars + RFT% line), a Top-Performers panel, an NC-Scrap
+> panel, and a bottom row of Counter Verifier / Before Cure / After Cure
+> donuts + a Uniformity RFT gauge — each with a centre percentage and a
+> 🙂/😐/☹️ status face. Reading the aggregates (not the raw million-row facts)
+> also keeps the webapp backend well within memory.
 
 ## 🖥️ Webapp tabs
 
