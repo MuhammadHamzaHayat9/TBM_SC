@@ -1,112 +1,77 @@
 # TBM_SC — Tire Building Scorecard
 
-Dataiku project that turns raw production / quality data into a **multi-page Dash webapp** scorecard — a Power BI replacement for tire-building operator quality monitoring.
+Dataiku project that turns raw production / quality data into a **Dash webapp** scorecard — a Power BI replacement for tire-building operator quality monitoring.
 
-> **v3 — full Power BI rebuild.** `webapps/tire_scorecard/app.py` now mirrors the
-> 13-page **TB ScoreCard** Power BI report: two mirror-image domains
-> (**Confection = 1st Step**, **Finishing = 2nd Step**), each with a ScoreCard,
-> four detail pages, and a Rankings page, plus a shared Uniformity focus page.
-> The **Counter Verifier (C1P)** KPI/donut is a first-class citizen again.
+> **v4 — reads the pre-computed aggregates.** `webapps/tire_scorecard/app.py`
+> reads the small `agg_*` datasets (a few hundred to a few thousand rows each)
+> plus `fact_counter_verifier`, instead of the raw multi-million-row fact
+> tables. This keeps the webapp backend well within memory (earlier versions
+> that eagerly loaded the big facts were being killed at startup).
+
+## 🖥️ Webapp tabs
+
+| Tab | Reads | Shows |
+|---|---|---|
+| **ScoreCard** | `agg_top_performers`, `agg_uniformity`, `agg_donut_bc/ac/scrap`, `agg_weekly_trend`, `fact_counter_verifier` | KPI cards (Tires, Before Cure %, After Cure %, Scrap lbs/tire, Uniformity RFT %, Counter Verifier %), BC / AC / Scrap donuts, weekly trend, Top-10 performers |
+| **Counter Verifier** | `fact_counter_verifier` | Leak % KPIs, leaks-by-station donut, weekly leak-% trend, highest leak-rate operators |
+| **Rankings** | `agg_top_performers` | Full operator ranking table + Top-N bar charts (RFT%, AC%, BC%) |
+
+Filters: **BU, Crew, Week, Operator**. Click any operator name on a leaderboard
+or ranking to drill the whole app to that operator. The week filter applies to
+the weekly trends, Uniformity, and Counter Verifier; the operator KPI cards and
+CQ donuts are period totals (the `agg_donut_*` and `agg_top_performers`
+datasets are not week-grained).
+
+## 📡 Datasets the webapp reads
+
+| Dataset | Grain | Drives |
+|---|---|---|
+| `agg_top_performers` | operator | KPI cards, leaderboard, rankings |
+| `agg_uniformity` | BU × Crew × Week | Uniformity RFT KPI + trend |
+| `agg_donut_bc` | BU × Crew × CQ | Before-Cure donut |
+| `agg_donut_ac` | BU × Crew × CQ | After-Cure donut |
+| `agg_donut_scrap` | BU × Crew × TBM | NC Scrap donut |
+| `agg_weekly_trend` | BU × Week | Weekly trend (tires + BC%/AC%) |
+| `fact_counter_verifier` | tire | Counter Verifier % KPI, leaks-by-station, CV trend |
 
 ## 🗂️ Repo layout
 
 ```
 webapps/
   tire_scorecard/
-    app.py                          # Multi-page Dash webapp (paste into Dataiku Code Webapp → Dash)
+    app.py                        # Dash webapp (paste into Dataiku Code Webapp → Dash)
 python_recipes/
-  compute_dim_operator.py           # Dimension: operator master (HR + BU/Crew)
-  compute_fact_first_step.py        # Fact: tires built per operator/day/TBM
-  compute_fact_conf_bc.py           # Fact: Before-Cure CQ events (Confection)
-  compute_fact_conf_ac.py           # Fact: After-Cure CQ events (Confection)
-  compute_fact_counter_verifier.py  # Fact: Counter Verifier (C1P) leak results (Confection)
-  compute_fact_nc_scrap.py          # Fact: NC scrap lbs per operator/day/TBM
-  compute_fact_uniformity.py        # Fact: per-tire uniformity test, confection-keyed (IRF4 / RFT)
-  # --- Finishing / 2nd Step (mirror the Confection recipes) ---
-  compute_fact_second_step.py       # Fact: 2nd-step tires built per operator/day/TBM
-  compute_fact_fin_bc.py            # Fact: Before-Cure CQ events (Finishing)
-  compute_fact_fin_ac.py            # Fact: After-Cure CQ events (Finishing)
-  compute_fact_fin_counter_verifier.py # Fact: Counter Verifier (C1P) leak results (Finishing)
-  compute_fact_uniformity_fin.py    # Fact: per-tire uniformity test, finishing-keyed
-  compute_agg_top_performers_fin.py # Aggregate: 2nd-step operator leaderboard
-  compute_agg_kpi_summary.py        # Aggregate: BU x Crew x Week KPIs
-  compute_agg_donut_bc.py           # Aggregate: BC donut data
-  compute_agg_donut_ac.py           # Aggregate: AC donut data
-  compute_agg_donut_scrap.py        # Aggregate: Scrap donut data
-  compute_agg_top_performers.py     # Aggregate: operator leaderboard
-  compute_agg_weekly_trend.py       # Aggregate: weekly bar+line trend
+  compute_dim_operator.py         # Dimension: operator master (HR + BU/Crew)
+  compute_fact_first_step.py      # Fact: tires built per operator/day/TBM
+  compute_fact_conf_bc.py         # Fact: Before-Cure CQ events
+  compute_fact_conf_ac.py         # Fact: After-Cure CQ events
+  compute_fact_nc_scrap.py        # Fact: NC scrap lbs per operator/day/TBM
+  compute_fact_uniformity.py      # Fact: per-tire uniformity test (IRF4 / RFT)
+  compute_agg_kpi_summary.py      # Aggregate: BU x Crew x Week KPIs
+  compute_agg_donut_bc.py         # Aggregate: BC donut data
+  compute_agg_donut_ac.py         # Aggregate: AC donut data
+  compute_agg_donut_scrap.py      # Aggregate: Scrap donut data
+  compute_agg_top_performers.py   # Aggregate: operator leaderboard
+  compute_agg_weekly_trend.py     # Aggregate: weekly bar+line trend
+  inspect_schemas.py              # Read-only helper: dump dataset columns / samples
 ```
 
-## 🖥️ Webapp pages (mirrors the Power BI report)
-
-The webapp has a left-hand sidebar that navigates the 13 report pages. The same
-page builders serve both domains, parameterised by `DOMAINS` at the top of
-`app.py` — repoint the **Finishing** dataset names there at your real 2nd-Step
-datasets (any dataset not built yet simply renders "No data").
-
-| Domain | Pages |
-|---|---|
-| **Confection (1st Step)** | ScoreCard · C1P Leak Details · BC Details · AC Details · UNIF Details · Rankings |
-| **Finishing (2nd Step)** | ScoreCard · C1P Leak Details · BC Details · AC Details · UNIF Details · Rankings |
-| **Shared** | Uniformity — Non-1st Focus |
-
-### ScoreCard page
-- **KPI cards:** Tires Built, **Counter Verifier %**, Before Cure %, After Cure %, Uniformity RFT %
-- **Donuts:** Counter Verifier Results (leak type/station), Before Cure, After Cure
-- **Uniformity RFT gauge** + **"Previous Weeks Results"** combo chart (BC% / AC% / RFT% lines over tires-built bars)
-- **Two leaderboards:** Total Quality — Top Performers, and Top Performers — NC Scrap
-- **Filters:** Business Unit, Crew, Week, Rankings Top-N; click any operator name to drill the whole app to that operator
-
-### Detail pages
-Chart + breakdown table for the Counter Verifier (C1P), Before Cure, After Cure, and Uniformity streams.
-
-### Rankings page
-Operator ranking table (Tires, BC%, AC%, RFT%, Scrap%, Score) plus Top-N bar charts (Top RFT%, Lowest AC%, Lowest BC%).
+> Note: the recipe files in `python_recipes/` document the flow, but the live
+> Dataiku project may build some `agg_*` datasets with newer logic (e.g.
+> `agg_top_performers` now carries uniformity columns and `agg_uniformity`
+> exists). The webapp reads whatever columns the built datasets expose.
 
 ## 🔄 Flow (Dataiku)
 
 ```
 view_employee  ┐
-BU_data        ┴─► dim_operator ──────────┐
-first_step_prod ------------------------├─► fact_first_step ──┐
-conf_bc_grq2 ┐                          │                     │
-TBM6         ┴─► fact_conf_bc ──────────│                     │
-conf_ac_grq2 ┐                          │                     ├─► aggregates ─► Dash webapp
-TBM6         ┴─► fact_conf_ac ──────────│                     │
-counter_verifier ──────────────────────├─► fact_counter_verifier
-uniformity_breakdown ──────────────────├─► fact_uniformity    │
-nc_scrap ──────────────────────────────┴─► fact_nc_scrap ─────┘
+BU_data        ┴─► dim_operator ───────┐
+first_step_prod ----------------------├─► fact_first_step ─┐
+conf_bc_grq2 ┐                       │                    ├─► agg_* ─► Dash webapp
+TBM6         ┴─► fact_conf_bc ───────│                    │
+conf_ac_grq2 ┐                       │                    │
+TBM6         ┴─► fact_conf_ac ───────│                    │
+uniformity_breakdown ────────────────├─► fact_uniformity  │
+nc_scrap ──────────────────────────┴─► fact_nc_scrap ────┘
+counter_verifier ─────────────────────► fact_counter_verifier ─► Dash webapp
 ```
-
-## 📡 Datasets
-
-The webapp reads the following Dataiku datasets at runtime:
-
-| Dataset | Description |
-|---|---|
-| `fact_first_step` | Tires built per operator/day/TBM (Confection) |
-| `fact_conf_bc` | Before-Cure CQ events |
-| `fact_conf_ac` | After-Cure CQ events |
-| `fact_counter_verifier` | End-of-line Counter Verifier (C1P) leak results — drives the Counter Verifier % KPI and leaks-by-type/station donut |
-| `fact_uniformity` | Per-tire uniformity test — drives the Uniformity RFT % KPI, gauge, and RFT% trend line |
-| `fact_nc_scrap` | NC scrap lbs per operator/day/TBM |
-| `agg_top_performers` | Operator leaderboard scores |
-
-### Finishing / 2nd-Step domain
-
-The Finishing pages are driven by the `compute_fact_fin_*` /
-`compute_fact_second_step` / `compute_agg_top_performers_fin` recipes, which
-mirror the Confection recipes. Each recipe reads a 2nd-step **source** dataset,
-declared as a `SRC = "..."` constant at the top — confirm these match your
-Dataiku project (defaults follow the Confection naming convention):
-
-| Finishing output | Source dataset (`SRC`) | Mirrors |
-|---|---|---|
-| `fact_second_step` | `second_step_prod` | `fact_first_step` |
-| `fact_fin_bc` | `fin_bc_grq2` | `fact_conf_bc` |
-| `fact_fin_ac` | `fin_ac_grq2` | `fact_conf_ac` |
-| `fact_fin_counter_verifier` | `fin_counter_verifier` | `fact_counter_verifier` |
-| `fact_uniformity_fin` | `uniformity_breakdown` (finishing-keyed) | `fact_uniformity` |
-| `agg_top_performers_fin` | the four facts above | `agg_top_performers` |
-
-Until these datasets are built, the Finishing pages render gracefully with "No data".
