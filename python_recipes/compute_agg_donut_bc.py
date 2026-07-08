@@ -12,7 +12,9 @@ bc = dataiku.Dataset("fact_conf_bc").get_dataframe()
 bc.columns = [c.upper() for c in bc.columns]
 bc = bc.dropna(subset=["CQ_CODE_STR"]).copy()
 
-agg = (bc.groupby(["BU","CREW","CQ_CODE_STR","CQ_DESCRIPTION","CQ_RELATES_TO","CQ_TYPE_TIER"],
+# PROD_YEAR/PROD_WEEK are included so the webapp can filter the donut by week.
+agg = (bc.groupby(["BU","CREW","PROD_YEAR","PROD_WEEK",
+                   "CQ_CODE_STR","CQ_DESCRIPTION","CQ_RELATES_TO","CQ_TYPE_TIER"],
                   dropna=False).size().reset_index(name="CQ_COUNT")
          .sort_values("CQ_COUNT", ascending=False))
 
