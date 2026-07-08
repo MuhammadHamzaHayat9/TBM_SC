@@ -28,7 +28,7 @@ and **2nd Step (Finishing)**, like the old app's two score-card tabs:
 |---|---|---|
 | `compute_fact_second_step.py` | `fact_second_step` | `second_step_prod` |
 | `compute_agg_uniformity_fin.py` | `agg_uniformity_fin` | `uniformity_breakdown` (FINISHING_OPERATOR_ID) |
-| `compute_agg_top_performers_fin.py` | `agg_top_performers_fin` | fact_second_step + finishing CQs + scrap + uniformity |
+| `compute_agg_top_performers_fin.py` | `agg_top_performers_fin` | fact_second_step + fact_conf_bc + fact_conf_ac + fact_nc_scrap + fact_uniformity (column-limited reads) |
 | `compute_agg_weekly_trend_fin.py` | `agg_weekly_trend_fin` | fact_second_step + finishing CQs |
 
 ## 🖥️ Webapp tabs

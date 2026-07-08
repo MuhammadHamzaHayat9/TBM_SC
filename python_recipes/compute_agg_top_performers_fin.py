@@ -1,42 +1,58 @@
 # -*- coding: utf-8 -*-
 """
 Recipe: agg_top_performers_fin   (2nd-Step / Finishing operator leaderboard)
-Inputs : fact_second_step, fact_conf_bc, fact_conf_ac, fact_nc_scrap,
-         uniformity_breakdown, dim_operator
-Output : agg_top_performers_fin   (same columns the webapp reads from
-         agg_top_performers)
+Inputs : fact_second_step, fact_conf_bc, fact_conf_ac, fact_nc_scrap, fact_uniformity
+Output : agg_top_performers_fin   (same columns the webapp reads from agg_top_performers)
+
+Memory-safe: each input is read with only the columns this recipe needs
+(get_dataframe(columns=...)), and uniformity comes from the slim, pre-built
+fact_uniformity instead of the wide raw uniformity_breakdown — so the whole
+recipe stays small even though the underlying tables are large.
 
 - TIRES_BUILT / SHIFTS_WORKED : from fact_second_step (2nd-step production)
+- BC_COUNT / AC_COUNT         : Before/After-Cure CQs where CQ_RELATES_TO='Finishing'
+- SCRAP_LBS                   : from fact_nc_scrap
 - UNI_TESTED / UNI_RFT / RFT_PCT : uniformity keyed on FINISHING_OPERATOR_ID
-- BC_COUNT / AC_COUNT : the Before/After-Cure CQs whose CQ_RELATES_TO = 'Finishing'
-- SCRAP_LBS : from fact_nc_scrap
-- QUALITY_SCORE / RANK : normalised composite (lower = better), like the 1st-step recipe
+- QUALITY_SCORE / RANK        : normalised composite (lower = better)
 """
 
 import dataiku
 import pandas as pd
 
-prod  = dataiku.Dataset("fact_second_step").get_dataframe()
-bc    = dataiku.Dataset("fact_conf_bc").get_dataframe()
-ac    = dataiku.Dataset("fact_conf_ac").get_dataframe()
-scrap = dataiku.Dataset("fact_nc_scrap").get_dataframe()
-uni   = dataiku.Dataset("uniformity_breakdown").get_dataframe()
-for df in (prod, bc, ac, scrap, uni):
+def read(name, cols):
+    """Read only the needed columns; fall back to a full read + subset if the
+    column list doesn't match the stored schema exactly."""
+    ds = dataiku.Dataset(name)
+    try:
+        df = ds.get_dataframe(columns=cols)
+    except Exception:
+        df = ds.get_dataframe()
+        want = {c.upper() for c in cols}
+        df = df[[c for c in df.columns if c.upper() in want]]
     df.columns = [c.upper() for c in df.columns]
+    return df
 
-def norm(x):
-    if pd.isna(x): return None
-    try:    return str(int(float(x))).zfill(6)
-    except: return str(x).strip().zfill(6)
+def norm_ids(s):
+    txt = s.astype("string").str.strip().str.replace(r"\.0+$", "", regex=True).str.zfill(6)
+    return txt.where(s.notna(), None)
+
+prod  = read("fact_second_step", ["OP_ID", "OPERATOR_NAME", "BU", "CREW",
+                                   "SUPERVISOR_CHORUS_ID", "TIRES_BUILT", "PROD_DATE"])
+bc    = read("fact_conf_bc", ["OP_ID", "CQ_CODE_STR", "CQ_RELATES_TO"])
+ac    = read("fact_conf_ac", ["OP_ID", "CQ_CODE_STR", "CQ_RELATES_TO"])
+scrap = read("fact_nc_scrap", ["OP_ID", "OP_SCRAP_LBS_BY_TIRES"])
+uni   = read("fact_uniformity", ["FINISHING_OPERATOR_ID", "BARCODE", "IS_RFT"])
 
 for df in (prod, bc, ac, scrap):
-    df["OP_ID"] = df["OP_ID"].apply(norm)
+    if "OP_ID" in df.columns:
+        df["OP_ID"] = norm_ids(df["OP_ID"])
 
-# Only Finishing-related CQs
-if "CQ_RELATES_TO" in bc.columns:
-    bc = bc[bc["CQ_RELATES_TO"].astype("string").str.strip().str.casefold() == "finishing"]
-if "CQ_RELATES_TO" in ac.columns:
-    ac = ac[ac["CQ_RELATES_TO"].astype("string").str.strip().str.casefold() == "finishing"]
+# Keep only Finishing-related CQs
+def fin_only(df):
+    if "CQ_RELATES_TO" in df.columns:
+        df = df[df["CQ_RELATES_TO"].astype("string").str.strip().str.casefold() == "finishing"]
+    return df
+bc, ac = fin_only(bc), fin_only(ac)
 
 op_base = (prod.groupby(["OP_ID", "OPERATOR_NAME", "BU", "CREW", "SUPERVISOR_CHORUS_ID"], dropna=False)
                .agg(TIRES_BUILT=("TIRES_BUILT", "sum"), SHIFTS_WORKED=("PROD_DATE", "nunique"))
@@ -45,14 +61,13 @@ bc_agg = bc.dropna(subset=["CQ_CODE_STR"]).groupby("OP_ID").size().reset_index(n
 ac_agg = ac.dropna(subset=["CQ_CODE_STR"]).groupby("OP_ID").size().reset_index(name="AC_COUNT")
 scrap_agg = scrap.groupby("OP_ID").agg(SCRAP_LBS=("OP_SCRAP_LBS_BY_TIRES", "sum")).reset_index()
 
-# Finishing uniformity per operator
-fin_op = "FINISHING_OPERATOR_ID" if "FINISHING_OPERATOR_ID" in uni.columns else "CONFECTION_OPERATOR_ID"
-uni["OP_ID"] = uni[fin_op].apply(norm)
-grade = "OGU2_GRADE" if "OGU2_GRADE" in uni.columns else "UNI_GRADE"
-if {"BARCODE", "TEST_DATETIME"}.issubset(uni.columns):
-    uni = uni.sort_values(["BARCODE", "TEST_DATETIME"]).drop_duplicates("BARCODE", keep="first")
-uni["IS_RFT"] = ((uni.get("RUN_TYPE") == "N") & (uni[grade].isna())).astype(int) if grade in uni.columns else 0
-uni_agg = (uni.groupby("OP_ID").agg(UNI_TESTED=("BARCODE", "nunique"), UNI_RFT=("IS_RFT", "sum")).reset_index())
+# Finishing uniformity per operator (one RFT flag per barcode, then per operator)
+uni["OP_ID"] = norm_ids(uni["FINISHING_OPERATOR_ID"])
+uni["IS_RFT"] = pd.to_numeric(uni.get("IS_RFT"), errors="coerce").fillna(0)
+per_tire = uni.groupby(["OP_ID", "BARCODE"], dropna=False)["IS_RFT"].max().reset_index()
+uni_agg = (per_tire.groupby("OP_ID")
+                   .agg(UNI_TESTED=("BARCODE", "nunique"), UNI_RFT=("IS_RFT", "sum"))
+                   .reset_index())
 
 agg = (op_base.merge(bc_agg, on="OP_ID", how="left").merge(ac_agg, on="OP_ID", how="left")
               .merge(scrap_agg, on="OP_ID", how="left").merge(uni_agg, on="OP_ID", how="left"))
