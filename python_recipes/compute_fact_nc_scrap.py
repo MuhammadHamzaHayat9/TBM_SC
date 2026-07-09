@@ -35,5 +35,9 @@ fact["PROD_YEAR"]  = fact["PROD_DATE"].dt.year
 fact["PROD_MONTH"] = fact["PROD_DATE"].dt.month
 fact["PROD_WEEK"]  = fact["PROD_DATE"].dt.isocalendar().week.astype("Int64")
 
+MIN_PROD_DATE = "2026-05-01"   # only keep scrap on/after this date (set None to disable)
+if MIN_PROD_DATE:
+    fact = fact[fact["PROD_DATE"] >= pd.Timestamp(MIN_PROD_DATE)]
+
 print(f"fact_nc_scrap rows: {len(fact):,}")
 dataiku.Dataset("fact_nc_scrap").write_with_schema(fact)

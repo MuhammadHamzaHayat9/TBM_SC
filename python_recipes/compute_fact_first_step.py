@@ -36,6 +36,10 @@ fact["PROD_MONTH"] = fact["PROD_DATE"].dt.month
 fact["PROD_WEEK"]  = fact["PROD_DATE"].dt.isocalendar().week.astype("Int64")
 fact["PROD_DOW"]   = fact["PROD_DATE"].dt.dayofweek
 
+MIN_PROD_DATE = "2026-05-01"   # only keep production on/after this date (set None to disable)
+if MIN_PROD_DATE:
+    fact = fact[fact["PROD_DATE"] >= pd.Timestamp(MIN_PROD_DATE)]
+
 print(f"fact_first_step rows: {len(fact):,}")
 print(f"  with operator info: {fact['OPERATOR_NAME'].notna().sum():,}")
 

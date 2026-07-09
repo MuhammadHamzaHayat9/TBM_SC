@@ -83,6 +83,10 @@ dim_slim = dim[[
 
 fact = uni.merge(dim_slim, on="OP_ID", how="left")
 
+MIN_PROD_DATE = "2026-05-01"   # only keep tests built on/after this date (set None to disable)
+if MIN_PROD_DATE:
+    fact = fact[fact["PROD_DATE"] >= pd.Timestamp(MIN_PROD_DATE)]
+
 # ---------- Diagnostics ----------
 print(f"fact_uniformity rows: {len(fact):,}")
 print(f"  unique tires (BARCODE)        : {fact['BARCODE'].nunique():,}")
