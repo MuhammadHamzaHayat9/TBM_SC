@@ -55,13 +55,23 @@ def process_chunk(df):
         out = out[out["PROD_DATE"] >= pd.Timestamp(MIN_PROD_DATE)]
     return out
 
-parts = []
+def read_chunks(use_cols):
+    collected = []
+    it = (ds.iter_dataframes(chunksize=CHUNK, columns=use_cols) if use_cols
+          else ds.iter_dataframes(chunksize=CHUNK))
+    for chunk in it:
+        collected.append(process_chunk(chunk))
+    return collected
+
+# Prefer the column-projected read; if projection breaks the stream for this
+# dataset (some connectors raise TypeError/IndexError), fall back to reading
+# every column per chunk — chunking still bounds memory and process_chunk picks
+# the columns it needs.
 try:
-    for chunk in ds.iter_dataframes(chunksize=CHUNK, columns=read_cols):
-        parts.append(process_chunk(chunk))
-except TypeError:
-    for chunk in ds.iter_dataframes(chunksize=CHUNK):   # older API without columns=
-        parts.append(process_chunk(chunk))
+    parts = read_chunks(read_cols)
+except Exception as e:
+    print(f"[info] column-projected chunk read failed ({e}); retrying without projection")
+    parts = read_chunks(None)
 bc = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["OP_ID", "CQ_CODE_STR"])
 del parts
 
