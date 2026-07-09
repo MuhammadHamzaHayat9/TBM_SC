@@ -325,7 +325,10 @@ def page_scorecard(step, bus, crews, weeks, op_id, topn=10):
     cv_fig = donut(["OK", "Leak"], [cv_ok, cv_leaks], [COLORS["good"], COLORS["danger"]],
                    center_text=f"{cv_pct:.1f}%", center_color=COLORS["danger"] if cv_pct > 8 else COLORS["good"])
     dbc_s = by_relates(filt(DBC, bus, crews, weeks, drop_bu_na=True), relates)
-    dac_s = by_relates(filt(DAC, bus, crews, weeks, drop_bu_na=True), relates)
+    # After-Cure: 1st step = Confection-related; 2nd step = ALL AC CQs (none are
+    # tagged Finishing, so 2nd step counts every AC CQ — matches the KPI).
+    dac_all = filt(DAC, bus, crews, weeks, drop_bu_na=True)
+    dac_s = dac_all if str(step) == "2" else by_relates(dac_all, relates)
     bl, bv = cat_counts(dbc_s, ["CQ_TYPE_TIER", "CQ_DESCRIPTION", "CQ_CODE_STR"], "CQ_COUNT")
     bc_fig = donut(bl, bv, CAT, center_text=f"{bc_pct:.2f}%", center_color=COLORS["danger"])
     al, av = cat_counts(dac_s, ["CQ_TYPE_TIER", "CQ_DESCRIPTION", "CQ_CODE_STR"], "CQ_COUNT")

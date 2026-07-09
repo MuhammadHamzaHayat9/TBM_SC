@@ -68,12 +68,15 @@ uni = uni.rename(columns={
 uni["IS_RFT"]      = ((uni["RUN_TYPE"] == "N") & (uni["UNI_GRADE"].isna())).astype(int)
 uni["IS_REPAIRED"] = uni["UNI_REPAIR"].notna().astype(int)
 
-# ---------- Derive PROD_DATE / YEAR / MONTH / WEEK from when tire was BUILT ----------
+# ---------- Derive PROD_DATE / YEAR / MONTH / WEEK from when the tire was TESTED ----------
+# TEST_DATE is the reliable timestamp (CONFECTION_TIMESTAMP is often null/clustered),
+# so we key uniformity by the test week — that's how the RFT trend spreads across weeks.
 uni["CONFECTION_TIMESTAMP"] = pd.to_datetime(uni["CONFECTION_TIMESTAMP"], errors="coerce")
-uni["PROD_DATE"]  = uni["CONFECTION_TIMESTAMP"].dt.normalize()
-uni["PROD_YEAR"]  = uni["CONFECTION_TIMESTAMP"].dt.year
-uni["PROD_MONTH"] = uni["CONFECTION_TIMESTAMP"].dt.month
-uni["PROD_WEEK"]  = uni["CONFECTION_TIMESTAMP"].dt.isocalendar().week.astype("Int64")
+uni["TEST_DATE"]  = pd.to_datetime(uni["TEST_DATE"], errors="coerce")
+uni["PROD_DATE"]  = uni["TEST_DATE"].dt.normalize()
+uni["PROD_YEAR"]  = uni["TEST_DATE"].dt.year
+uni["PROD_MONTH"] = uni["TEST_DATE"].dt.month
+uni["PROD_WEEK"]  = uni["TEST_DATE"].dt.isocalendar().week.astype("Int64")
 
 # ---------- Join operator info ----------
 dim_slim = dim[[
@@ -83,7 +86,7 @@ dim_slim = dim[[
 
 fact = uni.merge(dim_slim, on="OP_ID", how="left")
 
-MIN_PROD_DATE = "2026-05-01"   # only keep tests built on/after this date (set None to disable)
+MIN_PROD_DATE = "2026-05-01"   # only keep tests done on/after this date (set None to disable)
 if MIN_PROD_DATE:
     fact = fact[fact["PROD_DATE"] >= pd.Timestamp(MIN_PROD_DATE)]
 

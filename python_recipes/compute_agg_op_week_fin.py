@@ -38,7 +38,7 @@ prod  = read("fact_second_step", ["OP_ID", "OPERATOR_NAME", "BU", "CREW", "PROD_
 bc    = read("fact_conf_bc", ["OP_ID", "CQ_CODE_STR", "CQ_RELATES_TO", "PROD_YEAR", "PROD_WEEK"])
 ac    = read("fact_conf_ac", ["OP_ID", "CQ_CODE_STR", "CQ_RELATES_TO", "PROD_YEAR", "PROD_WEEK"])
 scrap = read("fact_nc_scrap", ["OP_ID", "OP_SCRAP_LBS_BY_TIRES", "PROD_YEAR", "PROD_WEEK"])
-uni   = read("fact_uniformity", ["FINISHING_OPERATOR_ID", "BARCODE", "IS_RFT", "FINISHING_TIMESTAMP"])
+uni   = read("fact_uniformity", ["FINISHING_OPERATOR_ID", "BARCODE", "IS_RFT", "PROD_YEAR", "PROD_WEEK"])
 
 for df in (prod, bc, ac, scrap):
     if "OP_ID" in df.columns:
@@ -48,7 +48,9 @@ def relates(df):
     if "CQ_RELATES_TO" in df.columns:
         df = df[df["CQ_RELATES_TO"].astype("string").str.strip().str.casefold() == RELATES.casefold()]
     return df
-bc, ac = relates(bc), relates(ac)
+# Before-Cure = Finishing-related only; After-Cure = ALL after-cure CQs
+# (no AC is tagged 'Finishing', so 2nd step counts every AC CQ by request).
+bc = relates(bc)
 
 op_base = (prod.groupby(["OP_ID", "OPERATOR_NAME", "BU", "CREW"] + KEYS, dropna=False)
                .agg(TIRES_BUILT=("TIRES_BUILT", "sum"), SHIFTS=("PROD_DATE", "nunique"))
@@ -58,11 +60,9 @@ ac_agg = ac.dropna(subset=["CQ_CODE_STR"]).groupby(["OP_ID"] + KEYS, dropna=Fals
 scrap_agg = (scrap.groupby(["OP_ID"] + KEYS, dropna=False)
                   .agg(SCRAP_LBS=("OP_SCRAP_LBS_BY_TIRES", "sum")).reset_index())
 
-# Uniformity attributed to the FINISHING operator, dated by finishing time
+# Uniformity attributed to the FINISHING operator, dated by TEST week
+# (fact_uniformity's PROD_YEAR/PROD_WEEK are now the test-date week).
 uni["OP_ID"] = norm_ids(uni["FINISHING_OPERATOR_ID"])
-uni["FINISHING_TIMESTAMP"] = pd.to_datetime(uni["FINISHING_TIMESTAMP"], errors="coerce")
-uni["PROD_YEAR"] = uni["FINISHING_TIMESTAMP"].dt.year
-uni["PROD_WEEK"] = uni["FINISHING_TIMESTAMP"].dt.isocalendar().week.astype("Int64")
 uni["IS_RFT"] = pd.to_numeric(uni.get("IS_RFT"), errors="coerce").fillna(0)
 per_tire = uni.groupby(["OP_ID"] + KEYS + ["BARCODE"], dropna=False)["IS_RFT"].max().reset_index()
 uni_agg = (per_tire.groupby(["OP_ID"] + KEYS, dropna=False)
