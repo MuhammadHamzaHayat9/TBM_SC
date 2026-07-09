@@ -49,5 +49,9 @@ fact["PROD_YEAR"]  = fact["PROD_DATE"].dt.year
 fact["PROD_MONTH"] = fact["PROD_DATE"].dt.month
 fact["PROD_WEEK"]  = fact["PROD_DATE"].dt.isocalendar().week.astype("Int64")
 
+MIN_PROD_DATE = "2026-05-01"   # only keep production on/after this date (set None to disable)
+if MIN_PROD_DATE:
+    fact = fact[fact["PROD_DATE"] >= pd.Timestamp(MIN_PROD_DATE)]
+
 print(f"fact_second_step rows: {len(fact):,}   tires: {fact['TIRES_BUILT'].sum():,.0f}")
 dataiku.Dataset("fact_second_step").write_with_schema(fact)
