@@ -68,15 +68,17 @@ uni = uni.rename(columns={
 uni["IS_RFT"]      = ((uni["RUN_TYPE"] == "N") & (uni["UNI_GRADE"].isna())).astype(int)
 uni["IS_REPAIRED"] = uni["UNI_REPAIR"].notna().astype(int)
 
-# ---------- Derive PROD_DATE / YEAR / MONTH / WEEK from when the tire was TESTED ----------
-# TEST_DATE is the reliable timestamp (CONFECTION_TIMESTAMP is often null/clustered),
-# so we key uniformity by the test week — that's how the RFT trend spreads across weeks.
+# ---------- Derive PROD_DATE / YEAR / MONTH / WEEK from when the tire was BUILT ----------
+# Uniformity is attributed to the build week (CONFECTION_TIMESTAMP), which carries
+# the most week spread; TEST_DATETIME is only ever "this week" (a recent snapshot),
+# so it's used only as a fallback when confection time is null.
 uni["CONFECTION_TIMESTAMP"] = pd.to_datetime(uni["CONFECTION_TIMESTAMP"], errors="coerce")
 uni["TEST_DATE"]  = pd.to_datetime(uni["TEST_DATE"], errors="coerce")
-uni["PROD_DATE"]  = uni["TEST_DATE"].dt.normalize()
-uni["PROD_YEAR"]  = uni["TEST_DATE"].dt.year
-uni["PROD_MONTH"] = uni["TEST_DATE"].dt.month
-uni["PROD_WEEK"]  = uni["TEST_DATE"].dt.isocalendar().week.astype("Int64")
+_build_ts = uni["CONFECTION_TIMESTAMP"].fillna(uni["TEST_DATE"])
+uni["PROD_DATE"]  = _build_ts.dt.normalize()
+uni["PROD_YEAR"]  = _build_ts.dt.year
+uni["PROD_MONTH"] = _build_ts.dt.month
+uni["PROD_WEEK"]  = _build_ts.dt.isocalendar().week.astype("Int64")
 
 # ---------- Join operator info ----------
 dim_slim = dim[[
