@@ -52,9 +52,13 @@ def relates(df):
 # (no AC is tagged 'Finishing', so 2nd step counts every AC CQ by request).
 bc = relates(bc)
 
-op_base = (prod.groupby(["OP_ID", "OPERATOR_NAME", "BU", "CREW"] + KEYS, dropna=False)
-               .agg(TIRES_BUILT=("TIRES_BUILT", "sum"), SHIFTS=("PROD_DATE", "nunique"))
-               .reset_index())
+# Operator identity (constant per operator) — re-attached after the merge so
+# rows that exist only in a uniformity test-week still get BU / Crew / name.
+ident = (prod.dropna(subset=["OPERATOR_NAME"])
+             [["OP_ID", "OPERATOR_NAME", "BU", "CREW"]].drop_duplicates("OP_ID"))
+
+prod_agg = (prod.groupby(["OP_ID"] + KEYS, dropna=False)
+                .agg(TIRES_BUILT=("TIRES_BUILT", "sum"), SHIFTS=("PROD_DATE", "nunique")).reset_index())
 bc_agg = bc.dropna(subset=["CQ_CODE_STR"]).groupby(["OP_ID"] + KEYS, dropna=False).size().reset_index(name="BC_COUNT")
 ac_agg = ac.dropna(subset=["CQ_CODE_STR"]).groupby(["OP_ID"] + KEYS, dropna=False).size().reset_index(name="AC_COUNT")
 scrap_agg = (scrap.groupby(["OP_ID"] + KEYS, dropna=False)
@@ -68,11 +72,13 @@ per_tire = uni.groupby(["OP_ID"] + KEYS + ["BARCODE"], dropna=False)["IS_RFT"].m
 uni_agg = (per_tire.groupby(["OP_ID"] + KEYS, dropna=False)
                    .agg(UNI_TESTED=("BARCODE", "nunique"), UNI_RFT=("IS_RFT", "sum")).reset_index())
 
-agg = (op_base.merge(bc_agg, on=["OP_ID"] + KEYS, how="left")
-              .merge(ac_agg, on=["OP_ID"] + KEYS, how="left")
-              .merge(scrap_agg, on=["OP_ID"] + KEYS, how="left")
-              .merge(uni_agg, on=["OP_ID"] + KEYS, how="left"))
-for c in ["BC_COUNT", "AC_COUNT", "SCRAP_LBS", "UNI_TESTED", "UNI_RFT"]:
+# OUTER-merge so a uniformity test-week (tire built earlier) still appears; then
+# attach the operator identity by OP_ID.
+from functools import reduce
+agg = reduce(lambda l, r: l.merge(r, on=["OP_ID"] + KEYS, how="outer"),
+             [prod_agg, bc_agg, ac_agg, scrap_agg, uni_agg])
+agg = agg.merge(ident, on="OP_ID", how="left")
+for c in ["TIRES_BUILT", "SHIFTS", "BC_COUNT", "AC_COUNT", "SCRAP_LBS", "UNI_TESTED", "UNI_RFT"]:
     agg[c] = agg[c].fillna(0)
 
 print(f"agg_op_week_fin rows: {len(agg):,}   tires: {agg['TIRES_BUILT'].sum():,.0f}")
