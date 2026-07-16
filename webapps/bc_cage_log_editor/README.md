@@ -23,6 +23,20 @@ output `bc_cage_log_prepared`). That recipe:
 
 Dates are kept as text on purpose — the source dates have no year.
 
+## Look & feel
+
+BFGoodrich-themed data grid: brand top bar with the BFGoodrich logo, a
+red→navy accent stripe, a compact sortable grid (click a header to sort),
+a **per-column filter row**, a global search box, coloured Open/Closed
+status pills, and an **Add entry** modal dialog. Long Excel headers are
+shown as short labels (e.g. `Removal Date`, `Recoup By`, `Date Out`) with
+the full name on hover.
+
+The logo is loaded from `/local/static/BFGoodrich_logo.svg.png` (a file in
+**Global Shared Code → Static Web Resources**). If your logo lives at a
+different path, change the `src` of `#brand-logo` in `webapp.html`; a
+missing logo is hidden automatically so the layout stays clean.
+
 ## Status is automatic
 
 `Status` is **derived, never typed**. The add-entry form hides it; a new
