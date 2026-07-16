@@ -23,8 +23,10 @@ the messy `BC_Cage_Log` Excel import). That cleaned data:
 
 Dates are kept as text on purpose — the source dates have no year.
 
-> Whole-table overwrite = last write wins, so this suits one editor at a
-> time. The app reloads after every save to show the latest.
+`Bc_Cage_SP` is a **PostgreSQL** dataset, so the app writes **per row**:
+`INSERT` for a new row, `UPDATE ... WHERE row_id = ...` for an edit — it does
+**not** rewrite the whole table. This needs a stable key column **`row_id`**;
+add it once with the setup script below.
 
 ## Look & feel
 
@@ -55,21 +57,24 @@ Open/Closed badge and a dropdown to filter by status.
 
 ## How it works
 
-1. On load the app reads all rows of `Bc_Cage_SP` into memory.
+1. On load the app reads all rows of `Bc_Cage_SP` (incl. `row_id`) into memory.
+   `row_id` is hidden from the grid and the form.
 2. **Add entry** opens a modal; the new row appears at the top of the grid,
    highlighted amber (red edge), as *unsaved*.
 3. The **✎** button on any row opens the same modal pre-filled; edits mark
    the row *unsaved*, highlighted blue (navy edge). `Status` updates as soon
    as you fill/clear **Date Out**.
-4. **Save changes** sends the whole in-memory table to the backend, which
-   recomputes `Status` and overwrites `Bc_Cage_SP` with `write_with_schema`,
-   then the grid reloads.
+4. **Save changes** sends only the changed rows. The backend runs one `INSERT`
+   per new row (assigning `row_id` = max+1) and one `UPDATE ... WHERE row_id`
+   per edited row, in a single transaction with `COMMIT`, then the grid reloads.
 
 ## Setup in Dataiku
 
-1. Sync `bc_cage_log_prepared` into a dataset named **`Bc_Cage_SP`** (any
-   writable connection).
-2. **Webapps → + New webapp → Code webapp → Standard** (pick the
+1. Sync `bc_cage_log_prepared` into a **PostgreSQL** dataset named
+   **`Bc_Cage_SP`**.
+2. **Add the `row_id` key once** — run `python_recipes/add_row_id.py` in a
+   notebook (reads `Bc_Cage_SP`, adds `row_id` = 1…N, writes back once).
+3. **Webapps → + New webapp → Code webapp → Standard** (pick the
    "Simple webapp" starter), name it e.g. *BC Cage Log Editor*.
 3. Paste each file into its tab:
    | File | Tab |
@@ -78,15 +83,15 @@ Open/Closed badge and a dropdown to filter by status.
    | `webapp.js` | JS |
    | `webapp.css` | CSS |
    | `backend.py` | Python |
-4. In the webapp **Settings → Security** (or the "Datasets" panel), grant
+5. In the webapp **Settings → Security** (or the "Datasets" panel), grant
    `Bc_Cage_SP` → **Read/Write**.
-5. Enable the Python backend (toggle in the Python tab) and **Start** it,
+6. Enable the Python backend (toggle in the Python tab) and **Start** it,
    then **Preview**.
 
 ## Endpoints (backend.py)
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/schema` | GET | Column names/labels/types + derived flag → grid + form |
-| `/data` | GET | Current rows of `Bc_Cage_SP` |
-| `/save` | POST | Overwrite `Bc_Cage_SP` with the full table (edits + additions) |
+| `/schema` | GET | Column names/labels/types + derived flag → grid + form (row_id hidden) |
+| `/data` | GET | Current rows of `Bc_Cage_SP` (incl. row_id) |
+| `/save` | POST | Per-row `INSERT` (new) + `UPDATE … WHERE row_id` (edited), one COMMIT |

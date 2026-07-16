@@ -7,23 +7,21 @@ Paste into the Python tab of a Dataiku Code Webapp (Standard).
 
 Endpoints:
   GET  /schema  -> columns of the log (name + label + type + input + derived)
-  GET  /data    -> current rows of Bc_Cage_SP
-  POST /save    -> overwrite Bc_Cage_SP with the full table the frontend holds
-                   (existing rows with edits + new rows)
+  GET  /data    -> current rows of Bc_Cage_SP (incl. row_id key)
+  POST /save    -> per-row writes to Bc_Cage_SP: INSERT for new rows,
+                   UPDATE ... WHERE row_id = ... for edited rows
 
 Data model:
-  * Bc_Cage_SP is a SINGLE editable dataset (synced once from
-    bc_cage_log_prepared). The app both reads and writes it, so add and edit
-    both rewrite the whole table here. The frontend's in-memory table is the
-    source of truth — every save sends all rows and the backend overwrites.
+  * Bc_Cage_SP is a SINGLE editable PostgreSQL dataset (synced once from
+    bc_cage_log_prepared, then given a `row_id` integer key). The app reads
+    it and writes ONLY the changed rows via SQL — no whole-table rewrite.
+  * `row_id` is the stable key; it is hidden from the grid/form. New rows get
+    the next id (max+1) assigned server-side on insert.
   * Status is DERIVED, never typed: "Open" while "Date Removed" is blank
     (still in the cage), "Closed" once it has a date. Recomputed on save.
 
-Note: save overwrites the whole dataset (last write wins), so this is best
-for a single editor at a time. Use the reload after each save to pick up the
-latest before editing.
-
-Setup: grant Bc_Cage_SP Read/Write in the webapp Settings > Security.
+Requires: `row_id` column present in Bc_Cage_SP (add it once with the setup
+script), and Read/Write on Bc_Cage_SP in the webapp Settings > Security.
 """
 
 import json
@@ -31,17 +29,21 @@ import traceback
 
 import dataiku
 import pandas as pd
+from dataiku import SQLExecutor2
 from flask import request, jsonify
 
-# Single editable dataset: the app reads AND writes Bc_Cage_SP (synced once
-# from bc_cage_log_prepared). Add and edit both rewrite the whole table here.
+# Single editable PostgreSQL dataset, read + per-row SQL writes.
 INPUT_DATASET = "Bc_Cage_SP"
 OUTPUT_DATASET = "Bc_Cage_SP"
+
+# Stable integer key (hidden from the UI) used to target UPDATEs.
+KEY_COL = "row_id"
 
 # Derived column: computed from "Date Removed", never entered by the user.
 STATUS_COL = "Status"
 DATE_REMOVED_COL = "Date Removed"
 DERIVED_COLS = {STATUS_COL}
+HIDDEN_COLS = {KEY_COL}
 
 # Dataiku storage types that map to an HTML number input
 _NUMERIC_TYPES = {"tinyint", "smallint", "int", "bigint", "float", "double"}
@@ -175,6 +177,8 @@ def schema():
 
     cols = []
     for c in _schema_cols():
+        if c["name"] in HIDDEN_COLS:
+            continue
         t = (c.get("type") or "string").lower()
         if t in _NUMERIC_TYPES:
             input_type = "number"
@@ -207,33 +211,100 @@ def data():
         return jsonify({"error": str(e)}), 500
 
 
+# ============================================================
+# SQL helpers for per-row INSERT / UPDATE
+# ============================================================
+
+def _all_db_cols():
+    """Every column in the table, including row_id and Status."""
+    return [c["name"] for c in dataiku.Dataset(OUTPUT_DATASET).read_schema()]
+
+
+def _qident(name):
+    """Quote a SQL identifier (handles spaces, (), /, < in the header names)."""
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _lit(v):
+    """SQL literal for a text value; blank/None -> NULL."""
+    if v is None:
+        return "NULL"
+    s = str(v)
+    if s.strip() == "":
+        return "NULL"
+    return "'" + s.replace("'", "''") + "'"
+
+
+def _key_lit(v):
+    """Integer literal for row_id."""
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return "NULL"
+
+
+def _table_name():
+    """Resolved, quoted table name for Bc_Cage_SP (e.g. "PROJ_bc_cage_sp")."""
+    info = dataiku.Dataset(OUTPUT_DATASET).get_location_info(sensitive_info=True).get("info", {})
+    tbl = info.get("table")
+    sch = info.get("schema")
+    q = _qident(tbl)
+    if sch:
+        q = _qident(sch) + "." + q
+    return q
+
+
+def _with_status(row):
+    """Return a copy of the row with Status derived from Date Removed."""
+    r = dict(row)
+    dr = r.get(DATE_REMOVED_COL)
+    r[STATUS_COL] = "Closed" if (dr is not None and str(dr).strip() != "") else "Open"
+    return r
+
+
 @app.route("/save", methods=["POST"])
 def save():
-    """Overwrite Bc_Cage_SP with the full table the frontend holds (existing
-    rows with any edits + new rows). The frontend is the source of truth, so
-    every row is sent every save; Status is recomputed server-side."""
+    """Per-row writes: INSERT each new row (row_id assigned max+1), UPDATE each
+    edited row by row_id. All statements run in one transaction with COMMIT."""
     try:
         payload = json.loads(request.data or "{}")
-        rows = payload.get("rows")
-        if rows is None:
-            return jsonify({"error": "No rows provided."}), 400
-        # Guard against wiping the dataset by accident.
-        if len(rows) == 0:
-            return jsonify({"error": "Refusing to save an empty table."}), 400
+        inserts = payload.get("inserts") or []
+        updates = payload.get("updates") or []
+        if not inserts and not updates:
+            return jsonify({"error": "Nothing to save."}), 400
 
-        # Column order comes from the dataset schema (stable, ignores stray keys).
-        base_cols = [c["name"] for c in _schema_cols()]
-        df = pd.DataFrame(rows)
-        if base_cols:
-            df = df.reindex(columns=base_cols)
+        cols = _all_db_cols()
+        set_cols = [c for c in cols if c != KEY_COL]  # updatable columns
+        table = _table_name()
+        executor = SQLExecutor2(dataset=OUTPUT_DATASET)
 
-        # Status is derived, never trusted from the client.
-        df = _apply_status(df)
+        # next id for inserts
+        next_id = 0
+        if inserts:
+            mdf = executor.query_to_df(
+                "SELECT COALESCE(MAX(%s), 0) AS m FROM %s" % (_qident(KEY_COL), table))
+            next_id = int(mdf["m"].iloc[0]) + 1
 
-        _ensure_output_dataset()
-        dataiku.Dataset(OUTPUT_DATASET).write_with_schema(df)
+        stmts = []
+        for row in inserts:
+            r = _with_status(row)
+            r[KEY_COL] = next_id
+            next_id += 1
+            names = ", ".join(_qident(c) for c in cols)
+            vals = ", ".join(
+                _key_lit(r.get(c)) if c == KEY_COL else _lit(r.get(c)) for c in cols)
+            stmts.append("INSERT INTO %s (%s) VALUES (%s)" % (table, names, vals))
 
-        return jsonify({"saved": len(df), "total": len(df)})
+        for row in updates:
+            r = _with_status(row)
+            sets = ", ".join("%s = %s" % (_qident(c), _lit(r.get(c))) for c in set_cols)
+            stmts.append("UPDATE %s SET %s WHERE %s = %s" % (
+                table, sets, _qident(KEY_COL), _key_lit(r.get(KEY_COL))))
+
+        # run all DML then COMMIT (DSS rolls back otherwise)
+        executor.query_to_df("SELECT 1", pre_queries=stmts, post_queries=["COMMIT"])
+
+        return jsonify({"inserted": len(inserts), "updated": len(updates)})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
