@@ -26,11 +26,17 @@ Dates are kept as text on purpose — the source dates have no year.
 ## Look & feel
 
 BFGoodrich-themed data grid: brand top bar with the BFGoodrich logo, a
-red→navy accent stripe, a compact sortable grid (click a header to sort),
-a **per-column filter row**, a global search box, coloured Open/Closed
-status pills, and an **Add entry** modal dialog. Long Excel headers are
-shown as short labels (e.g. `Removal Date`, `Recoup By`, `Date Out`) with
-the full name on hover.
+centered **BC CAGE LOG** title, a red→navy accent stripe, a compact sortable
+grid (click a header to sort), a **per-column filter row**, a global search
+box, coloured Open/Closed status pills, and an **Add entry** modal dialog.
+Long Excel headers are shown as short labels (e.g. `Removal Date`,
+`Recoup By`, `Date Out`) with the full name on hover.
+
+Filters are **adaptive**: a column with up to ~40 distinct values renders as a
+**dropdown** (Location, Responsible, Entered By, Disposition, Status,
+Quantity…); higher-variety columns (Tire Code, dates) stay a text box with
+autocomplete, since a dropdown of hundreds of values is unusable. Tune the
+threshold via `DROPDOWN_MAX` in `webapp.js`.
 
 The logo is loaded from `/local/static/BFGoodrich_logo.svg.png` (a file in
 **Global Shared Code → Static Web Resources**). If your logo lives at a

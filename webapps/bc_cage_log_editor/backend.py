@@ -142,8 +142,9 @@ def _json_safe(df):
     return out.to_dict(orient="records")
 
 
-# columns with at most this many distinct values get autocomplete suggestions
-_SUGGEST_MAX_DISTINCT = 40
+# columns with at most this many distinct values get suggestion values
+# (used for autocomplete on text filters and for dropdown filters in the UI)
+_SUGGEST_MAX_DISTINCT = 500
 
 
 def _suggestions(df):
