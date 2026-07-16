@@ -1,11 +1,27 @@
 # BC Cage Log Editor — Dataiku Standard Webapp
 
-A simple data-entry webapp: shows the `BC_Cage_Log` dataset as a table,
-lets the user add new entries through a form, and saves everything
-(original rows + additions) to a new dataset `BC_Cage_Log_updated`.
+A simple data-entry webapp: shows the cage log as a table, lets the user
+add new entries through a form, and saves everything (original rows +
+additions) to a new dataset `BC_Cage_Log_updated`.
 
 The form and table are generated **dynamically from the dataset schema**,
-so column changes in `BC_Cage_Log` are picked up automatically.
+so column changes are picked up automatically.
+
+## Prerequisite: clean the raw import
+
+The raw `BC_Cage_Log` import is messy — the Excel has three banner/header
+rows on top, so Dataiku named the columns `col_0 … col_13` and pulled the
+real headers in as data rows. Before using this app, build a clean version `BC_Cage_Log_clean`:
+
+1. Create an empty **managed** dataset named `BC_Cage_Log_clean`.
+2. Run `python_recipes/clean_bc_cage_log.py` in a Dataiku notebook (or as a
+   Python recipe: input `BC_Cage_Log`, output `BC_Cage_Log_clean`). It
+   renames `col_0 … col_13` to the 14 real headers **by position** and keeps
+   only rows whose `RACK ID` is numeric — dropping the two banner rows, the
+   embedded header row, and blank rows.
+
+The app reads `BC_Cage_Log_clean` (see `INPUT_DATASET` in `backend.py`).
+Dates are kept as text on purpose — the source dates have no year.
 
 ## How it works
 

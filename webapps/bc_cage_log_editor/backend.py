@@ -24,7 +24,10 @@ import dataiku
 import pandas as pd
 from flask import request, jsonify
 
-INPUT_DATASET = "BC_Cage_Log"
+# Clean, renamed log produced by the Prepare recipe (BC_Cage_Log -> clean).
+# Raw BC_Cage_Log has 3 banner/header rows on top and col_0..col_13 names,
+# so the app reads the cleaned version instead.
+INPUT_DATASET = "BC_Cage_Log_clean"
 OUTPUT_DATASET = "BC_Cage_Log_updated"
 
 # Dataiku storage types that map to an HTML number input
