@@ -195,10 +195,25 @@ html, body { margin: 0; height: 100%; }
 #grid tbody tr:nth-child(even) { background: #fafbfd; }
 #grid tbody tr:hover { background: #eef4fb; }
 
+/* actions column (edit button) */
+#grid th.col-actions, #grid td.col-actions {
+  width: 34px; padding: 4px 0; text-align: center;
+}
+.row-edit {
+  border: none; background: none; cursor: pointer;
+  color: var(--bfg-navy); font-size: 14px; opacity: .55; line-height: 1;
+}
+.row-edit:hover { opacity: 1; color: var(--bfg-red); }
+
 /* freshly added, not yet saved */
 #grid tbody tr.pending { background: #fff8e1; }
 #grid tbody tr.pending:hover { background: #fff2c4; }
-#grid tbody tr.pending td:first-child { box-shadow: inset 3px 0 0 var(--bfg-red); }
+#grid tbody tr.pending td.col-actions { box-shadow: inset 3px 0 0 var(--bfg-red); }
+
+/* existing row edited, not yet saved */
+#grid tbody tr.edited { background: #eaf2ff; }
+#grid tbody tr.edited:hover { background: #dcebff; }
+#grid tbody tr.edited td.col-actions { box-shadow: inset 3px 0 0 var(--bfg-navy-2); }
 
 /* status pills */
 .pill {
