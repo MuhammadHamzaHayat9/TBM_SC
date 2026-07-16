@@ -6,11 +6,13 @@
   "use strict";
 
   var MAX_RENDER = 1500;              // cap DOM rows for snappy filtering
+  var DROPDOWN_MAX = 40;             // <= this many distinct values -> dropdown filter
   var columns = [];                  // [{name,label,type,input,derived,suggest}]
   var savedRows = [];                // rows already in the dataset
   var pendingRows = [];              // rows added in the UI, not yet saved
   var statusCol = null;              // name of derived Status column, if any
   var colFilters = {};               // colName -> filter text/value
+  var exactCols = {};                // colName -> true when its filter is a dropdown
   var sort = { name: null, dir: 1 }; // active sort column + direction
 
   function backend(p) { return getWebAppBackendUrl(p); }
@@ -60,16 +62,24 @@
   }
 
   function buildFilterRow() {
+    exactCols = {};
     var row = document.getElementById("filter-row");
     row.innerHTML = columns.map(function (c, i) {
-      if (c.name === statusCol) {
-        var opts = ['<option value="">All</option>']
-          .concat((c.suggest || ["Open", "Closed"]).map(function (v) {
-            return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
-          }));
-        return "<th><select data-col=\"" + esc(c.name) + "\">" + opts.join("") + "</select></th>";
+      var sug = c.suggest || [];
+      // dropdown for low-variety columns (Location, Responsible, Disposition,
+      // Status, Quantity…); type-to-filter for high-variety (Tire Code, dates).
+      var asDropdown = (c.name === statusCol) || (sug.length >= 1 && sug.length <= DROPDOWN_MAX);
+      if (asDropdown) {
+        exactCols[c.name] = true;
+        var vals = (sug.length ? sug.slice() : ["Open", "Closed"]).sort(function (a, b) {
+          return String(a).localeCompare(String(b), undefined, { numeric: true });
+        });
+        var opts = ['<option value="">All</option>'].concat(vals.map(function (v) {
+          return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
+        }));
+        return '<th><select data-col="' + esc(c.name) + '">' + opts.join("") + "</select></th>";
       }
-      var list = (c.suggest && c.suggest.length) ? ' list="dl-' + i + '"' : "";
+      var list = sug.length ? ' list="dl-' + i + '"' : "";
       return '<th><input data-col="' + esc(c.name) + '"' + list +
         ' placeholder="filter…"></th>';
     }).join("");
@@ -90,9 +100,8 @@
     for (var name in colFilters) {
       if (!colFilters.hasOwnProperty(name)) continue;
       var f = colFilters[name];
-      var cell = val(row, name).toLowerCase();
-      if (name === statusCol) { if (val(row, name) !== f) return false; }
-      else if (cell.indexOf(f.toLowerCase()) === -1) return false;
+      if (exactCols[name]) { if (val(row, name) !== f) return false; }
+      else if (val(row, name).toLowerCase().indexOf(f.toLowerCase()) === -1) return false;
     }
     if (global) {
       var hit = columns.some(function (c) {
@@ -258,8 +267,6 @@
       .then(function (j) {
         if (j.error) throw new Error(j.error);
         savedRows = j.rows || [];
-        document.getElementById("source-line").textContent =
-          j.count + " records · source: " + j.source;
         render();
       });
   }
@@ -281,6 +288,6 @@
       return loadData();
     })
     .catch(function (err) {
-      document.getElementById("source-line").textContent = "Error: " + err.message;
+      setMsg(document.getElementById("status-msg"), "Error: " + err.message, "err");
     });
 })();
