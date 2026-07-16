@@ -48,6 +48,29 @@ def _schema_cols():
     return []
 
 
+def _ensure_output_dataset():
+    """Create OUTPUT_DATASET as a managed dataset if it doesn't exist yet,
+    reusing the storage connection of an existing dataset in the project.
+    Lets the app work script-only, with nothing to create by hand."""
+    client = dataiku.api_client()
+    project = client.get_default_project()
+    if OUTPUT_DATASET in [d["name"] for d in project.list_datasets()]:
+        return
+    conn = None
+    for probe in (INPUT_DATASET, "agg_top_performers", "BC_Cage_Log"):
+        try:
+            raw_settings = project.get_dataset(probe).get_settings().get_raw()
+            conn = raw_settings.get("params", {}).get("connection")
+            if conn:
+                break
+        except Exception:
+            pass
+    conn = conn or "filesystem_managed"
+    builder = project.new_managed_dataset(OUTPUT_DATASET)
+    builder.with_store_into(conn)
+    builder.create()
+
+
 def _load_base():
     """Rows to show/extend: previously saved output if it has rows
     (original + past additions), otherwise the original import."""
@@ -71,8 +94,34 @@ def _json_safe(df):
     return out.to_dict(orient="records")
 
 
+# columns with at most this many distinct values get autocomplete suggestions
+_SUGGEST_MAX_DISTINCT = 40
+
+
+def _suggestions(df):
+    """For each low-variety column, the real distinct values (most common
+    first) so the form can offer them as autocomplete — without locking the
+    field, so unusual values can still be typed."""
+    out = {}
+    if df is None or df.empty:
+        return out
+    for c in df.columns:
+        vc = df[c].dropna().astype(str).str.strip()
+        vc = vc[vc != ""]
+        counts = vc.value_counts()
+        if 0 < len(counts) <= _SUGGEST_MAX_DISTINCT:
+            out[c] = list(counts.index[:_SUGGEST_MAX_DISTINCT])
+    return out
+
+
 @app.route("/schema")
 def schema():
+    try:
+        base, _ = _load_base()
+    except Exception:
+        base = pd.DataFrame()
+    suggest = _suggestions(base)
+
     cols = []
     for c in _schema_cols():
         t = (c.get("type") or "string").lower()
@@ -82,7 +131,12 @@ def schema():
             input_type = "date"
         else:
             input_type = "text"
-        cols.append({"name": c["name"], "type": t, "input": input_type})
+        cols.append({
+            "name": c["name"],
+            "type": t,
+            "input": input_type,
+            "suggest": suggest.get(c["name"], []),
+        })
     return jsonify({"columns": cols, "input": INPUT_DATASET, "output": OUTPUT_DATASET})
 
 
@@ -121,6 +175,7 @@ def save():
 
         full = pd.concat([base, add], ignore_index=True)
 
+        _ensure_output_dataset()
         out = dataiku.Dataset(OUTPUT_DATASET)
         out.write_with_schema(full)
 

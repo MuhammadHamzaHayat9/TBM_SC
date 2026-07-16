@@ -64,12 +64,22 @@
 
   function renderForm() {
     var wrap = document.getElementById("form-fields");
-    wrap.innerHTML = columns.map(function (c) {
+    wrap.innerHTML = columns.map(function (c, i) {
       var step = c.input === "number" ? ' step="any"' : "";
+      var suggest = c.suggest || [];
+      var listAttr = "", datalist = "";
+      if (suggest.length) {
+        var listId = "dl-" + i;
+        listAttr = ' list="' + listId + '"';
+        datalist = '<datalist id="' + listId + '">' +
+          suggest.map(function (v) { return '<option value="' + esc(String(v)) + '">'; }).join("") +
+          "</datalist>";
+      }
       return (
         '<label class="cage-field">' +
           '<span>' + esc(c.name) + '</span>' +
-          '<input name="' + esc(c.name) + '" type="' + c.input + '"' + step + '>' +
+          '<input name="' + esc(c.name) + '" type="' + c.input + '"' + step + listAttr + '>' +
+          datalist +
         "</label>"
       );
     }).join("");
