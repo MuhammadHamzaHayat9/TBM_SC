@@ -266,15 +266,19 @@
     var btn = this;
     btn.disabled = true;
     setMsg(document.getElementById("status-msg"), "Saving…");
+    // send only the changed rows: new rows -> INSERT, edited rows -> UPDATE
+    var inserts = Array.from(newSet);
+    var updates = Array.from(editSet);
     fetch(backend("/save"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: rows })
+      body: JSON.stringify({ inserts: inserts, updates: updates })
     })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok || res.j.error) throw new Error(res.j.error || "Save failed");
-        setMsg(document.getElementById("status-msg"), "Saved — " + res.j.total + " rows in Bc_Cage_SP.", "ok");
+        setMsg(document.getElementById("status-msg"),
+          "Saved — " + res.j.inserted + " added, " + res.j.updated + " updated.", "ok");
         return loadData();
       })
       .catch(function (err) {
