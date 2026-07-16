@@ -6,9 +6,10 @@
 (function () {
   "use strict";
 
-  var columns = [];      // [{name, type, input}]
+  var columns = [];      // [{name, type, input, derived, suggest}]
   var savedRows = [];    // rows already in the dataset
   var pendingRows = [];  // rows added in the UI, not yet saved
+  var statusCol = null;  // name of the derived Status column, if any
 
   function backend(path) {
     return getWebAppBackendUrl(path);
@@ -31,16 +32,24 @@
   function rowHtml(row, pending) {
     var cells = columns.map(function (c) {
       var v = row[c.name];
-      return "<td>" + (v === null || v === undefined ? "" : esc(String(v))) + "</td>";
+      var text = (v === null || v === undefined) ? "" : esc(String(v));
+      var cls = "";
+      if (c.name === statusCol && text) {
+        cls = ' class="st st-' + text.toLowerCase() + '"';
+      }
+      return "<td" + cls + ">" + text + "</td>";
     });
     return "<tr" + (pending ? ' class="pending"' : "") + ">" + cells.join("") + "</tr>";
   }
 
   function renderTable() {
     var filter = (document.getElementById("table-filter").value || "").toLowerCase();
+    var statusSel = document.getElementById("status-filter");
+    var wantStatus = statusSel ? statusSel.value : "";
     var tbody = document.querySelector("#log-table tbody");
 
     function match(row) {
+      if (wantStatus && statusCol && String(row[statusCol] || "") !== wantStatus) return false;
       if (!filter) return true;
       return columns.some(function (c) {
         var v = row[c.name];
@@ -50,39 +59,45 @@
     }
 
     // pending rows first so new entries are visible without scrolling
+    var shownPending = pendingRows.filter(match);
+    var shownSaved = savedRows.filter(match);
     var html = "";
-    pendingRows.filter(match).forEach(function (r) { html += rowHtml(r, true); });
-    savedRows.filter(match).forEach(function (r) { html += rowHtml(r, false); });
+    shownPending.forEach(function (r) { html += rowHtml(r, true); });
+    shownSaved.forEach(function (r) { html += rowHtml(r, false); });
     tbody.innerHTML = html;
 
+    var shownTotal = shownPending.length + shownSaved.length;
+    var allTotal = savedRows.length + pendingRows.length;
     document.getElementById("row-count").textContent =
-      savedRows.length + " saved" +
-      (pendingRows.length ? " + " + pendingRows.length + " unsaved" : "");
+      "Showing " + shownTotal + " of " + allTotal +
+      (pendingRows.length ? " (" + pendingRows.length + " unsaved)" : "");
 
     document.getElementById("save-btn").disabled = pendingRows.length === 0;
   }
 
   function renderForm() {
     var wrap = document.getElementById("form-fields");
-    wrap.innerHTML = columns.map(function (c, i) {
-      var step = c.input === "number" ? ' step="any"' : "";
-      var suggest = c.suggest || [];
-      var listAttr = "", datalist = "";
-      if (suggest.length) {
-        var listId = "dl-" + i;
-        listAttr = ' list="' + listId + '"';
-        datalist = '<datalist id="' + listId + '">' +
-          suggest.map(function (v) { return '<option value="' + esc(String(v)) + '">'; }).join("") +
-          "</datalist>";
-      }
-      return (
-        '<label class="cage-field">' +
-          '<span>' + esc(c.name) + '</span>' +
-          '<input name="' + esc(c.name) + '" type="' + c.input + '"' + step + listAttr + '>' +
-          datalist +
-        "</label>"
-      );
-    }).join("");
+    // derived columns (e.g. Status) are computed on save, not entered
+    wrap.innerHTML = columns.filter(function (c) { return !c.derived; })
+      .map(function (c, i) {
+        var step = c.input === "number" ? ' step="any"' : "";
+        var suggest = c.suggest || [];
+        var listAttr = "", datalist = "";
+        if (suggest.length) {
+          var listId = "dl-" + i;
+          listAttr = ' list="' + listId + '"';
+          datalist = '<datalist id="' + listId + '">' +
+            suggest.map(function (v) { return '<option value="' + esc(String(v)) + '">'; }).join("") +
+            "</datalist>";
+        }
+        return (
+          '<label class="cage-field">' +
+            '<span>' + esc(c.name) + '</span>' +
+            '<input name="' + esc(c.name) + '" type="' + c.input + '"' + step + listAttr + '>' +
+            datalist +
+          "</label>"
+        );
+      }).join("");
   }
 
   function esc(s) {
@@ -133,6 +148,7 @@
   });
 
   document.getElementById("table-filter").addEventListener("input", renderTable);
+  document.getElementById("status-filter").addEventListener("change", renderTable);
 
   // ---------- boot ----------
 
@@ -154,6 +170,10 @@
       columns = j.columns || [];
       document.getElementById("output-name").textContent = j.output;
       if (!columns.length) throw new Error("Could not read the schema of " + j.input);
+      var derived = columns.filter(function (c) { return c.derived; })[0];
+      statusCol = derived ? derived.name : null;
+      // show the Open/Closed filter only when there is a Status column
+      document.getElementById("status-filter").style.display = statusCol ? "" : "none";
       renderHeader();
       renderForm();
       return loadData();

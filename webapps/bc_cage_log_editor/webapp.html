@@ -7,6 +7,7 @@
 
   <section class="cage-card">
     <h2>Add new entry</h2>
+    <p class="cage-sub">Leave <strong>Date Removed</strong> blank for items still in the cage — Status is set automatically (Open until removed).</p>
     <form id="add-form" class="cage-form" autocomplete="off">
       <!-- inputs generated from the dataset schema by webapp.js -->
       <div id="form-fields" class="cage-fields"></div>
@@ -23,6 +24,11 @@
   <section class="cage-card">
     <div class="cage-table-head">
       <h2>Log entries</h2>
+      <select id="status-filter" title="Filter by status">
+        <option value="">All statuses</option>
+        <option value="Open">Open (in cage)</option>
+        <option value="Closed">Closed (removed)</option>
+      </select>
       <input type="search" id="table-filter" placeholder="Filter rows…">
       <span id="row-count" class="cage-sub"></span>
     </div>

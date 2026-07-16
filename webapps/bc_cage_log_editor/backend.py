@@ -6,15 +6,23 @@ Paste into the Python tab of a Dataiku Code Webapp (Standard).
 `app` (a Flask app) is provided by the Dataiku backend.
 
 Endpoints:
-  GET  /schema  -> columns of the log (name + type + suggested input type)
-  GET  /data    -> current rows (saved output if it exists, else BC_Cage_Log)
+  GET  /schema  -> columns of the log (name + type + input + derived flag)
+  GET  /data    -> current rows (saved output if it exists, else the input)
   POST /save    -> append the submitted new rows and write everything
-                   (original + additions) to BC_CAGE_LOG_UPDATED
+                   (original + additions) to the output dataset
 
-Setup: create a managed output dataset named BC_Cage_Log_updated in the
-Flow (e.g. +Dataset > Internal > Managed, filesystem connection) before
-the first Save, and list both datasets in the webapp Settings > Security
-(BC_Cage_Log: Read, BC_Cage_Log_updated: Write).
+Data model (from the prepare recipe):
+  * input  = bc_cage_log_prepared  (cleaned log, full Excel header names,
+             plus a derived "Status" column)
+  * output = bc_cage_log_updated   (original rows + rows added in the app)
+  * Status is DERIVED, never typed: "Open" while "Date Removed" is blank
+    (still in the cage), "Closed" once it has a date. The app recomputes it
+    on every save, so a new entry starts Open and flips to Closed when the
+    user fills Date Removed.
+
+Setup: list both datasets in the webapp Settings > Security
+(bc_cage_log_prepared: Read, bc_cage_log_updated: Read/Write). The output
+dataset is auto-created on first save if it does not exist.
 """
 
 import json
@@ -24,15 +32,28 @@ import dataiku
 import pandas as pd
 from flask import request, jsonify
 
-# Clean, renamed log produced by the Prepare recipe (BC_Cage_Log -> clean).
-# Raw BC_Cage_Log has 3 banner/header rows on top and col_0..col_13 names,
-# so the app reads the cleaned version instead.
-INPUT_DATASET = "BC_Cage_Log_clean"
-OUTPUT_DATASET = "BC_Cage_Log_updated"
+# Cleaned, prepared log produced by the Python recipe (BC_Cage_Log -> prepared).
+INPUT_DATASET = "bc_cage_log_prepared"
+OUTPUT_DATASET = "bc_cage_log_updated"
+
+# Derived column: computed from "Date Removed", never entered by the user.
+STATUS_COL = "Status"
+DATE_REMOVED_COL = "Date Removed"
+DERIVED_COLS = {STATUS_COL}
 
 # Dataiku storage types that map to an HTML number input
 _NUMERIC_TYPES = {"tinyint", "smallint", "int", "bigint", "float", "double"}
 _DATE_TYPES = {"date"}
+
+
+def _apply_status(df):
+    """(Re)derive Status from Date Removed: Open while blank, else Closed."""
+    if DATE_REMOVED_COL not in df.columns:
+        return df
+    dr = df[DATE_REMOVED_COL].astype("string").str.strip()
+    is_closed = dr.notna() & (dr.str.len() > 0)
+    df[STATUS_COL] = is_closed.map({True: "Closed", False: "Open"})
+    return df
 
 
 def _schema_cols():
@@ -57,7 +78,7 @@ def _ensure_output_dataset():
     if OUTPUT_DATASET in [d["name"] for d in project.list_datasets()]:
         return
     conn = None
-    for probe in (INPUT_DATASET, "agg_top_performers", "BC_Cage_Log"):
+    for probe in (INPUT_DATASET, "bc_cage_log_prepared", "agg_top_performers"):
         try:
             raw_settings = project.get_dataset(probe).get_settings().get_raw()
             conn = raw_settings.get("params", {}).get("connection")
@@ -135,6 +156,7 @@ def schema():
             "name": c["name"],
             "type": t,
             "input": input_type,
+            "derived": c["name"] in DERIVED_COLS,
             "suggest": suggest.get(c["name"], []),
         })
     return jsonify({"columns": cols, "input": INPUT_DATASET, "output": OUTPUT_DATASET})
@@ -174,6 +196,10 @@ def save():
                 add[c] = pd.to_numeric(add[c], errors="coerce")
 
         full = pd.concat([base, add], ignore_index=True)
+
+        # Status is derived, never trusted from the form — recompute for all
+        # rows so new entries are Open until a Date Removed is filled in.
+        full = _apply_status(full)
 
         _ensure_output_dataset()
         out = dataiku.Dataset(OUTPUT_DATASET)

@@ -1,89 +1,64 @@
 # -*- coding: utf-8 -*-
 """
-Clean BC_Cage_Log -> BC_Cage_Log_clean
+Prepare BC_Cage_Log -> bc_cage_log_prepared
 
-The raw BC_Cage_Log import is messy: the source Excel has three banner/
-header rows on top, so Dataiku named the columns col_0..col_13 and pulled
-the real headers ("RACK ID", "Date", ...) in as data rows.
+BC_Cage_Log is the uploaded cage log (re-imported cleanly: the Excel's three
+banner/header rows are skipped at import time, and the header line-breaks were
+flattened, so columns already carry the full names — "RACK ID",
+"Date (START HERE)", ... "Date Removed").
 
-This script renames the 14 columns BY POSITION (A..N of the Excel — robust
-to the junk source names) and keeps only real entries (RACK ID is numeric),
-which drops the two banner rows, the embedded header row, and blank rows.
+This recipe:
+  * drops ONLY completely-empty rows (keeps real records even when RACK ID is
+    blank — there are ~30 such genuine entries);
+  * trims stray whitespace and turns "" into NULL;
+  * derives a Status column: "Open" while "Date Removed" is blank (item still
+    in the cage / overflow), "Closed" once it has a date.
 
-Dates are kept as text on purpose: the source dates ("26-May", "12-Nov")
-have no year, so parsing them would guess the wrong one.
+Dates are kept as text on purpose: the source dates ("26-May", "12-Nov") have
+no year, so parsing them would guess the wrong one.
 
-Run in a Dataiku notebook (or paste into a Python recipe with input
-BC_Cage_Log and output BC_Cage_Log_clean). If the output dataset does not
-exist yet, this script creates it as a managed dataset, reusing the storage
-connection of an existing dataset in the project.
+Run as a Dataiku Python recipe (input BC_Cage_Log, output
+bc_cage_log_prepared) or paste into a notebook. If running in a notebook,
+create the bc_cage_log_prepared dataset first (e.g. a PostgreSQL managed
+dataset).
 """
 
 import dataiku
 import pandas as pd
 
-OUTPUT = "BC_Cage_Log_clean"
+INPUT = "BC_Cage_Log"
+OUTPUT = "bc_cage_log_prepared"
+DATE_REMOVED_COL = "Date Removed"
 
-# 14 real headers, in column order (A..N of the Excel)
-CLEAN_COLS = [
-    "RACK ID", "Date", "Removal Date", "Person Responsible",
-    "Person Entering", "Quantity", "Tire Codes", "CQ or Condition",
-    "Location", "Disposition", "Max Recoup Date", "Comments",
-    "Person Removing", "Date Removed",
-]
+# --- input ---
+df = dataiku.Dataset(INPUT).get_dataframe(infer_with_pandas=False)
 
-# read raw as stored (no type inference), keep everything as text
-raw = dataiku.Dataset("BC_Cage_Log").get_dataframe(infer_with_pandas=False)
+# --- drop ONLY completely-empty rows (all columns blank/NaN) ---
+def row_all_blank(r):
+    return all(pd.isna(v) or str(v).strip() == "" for v in r)
 
-if raw.shape[1] != len(CLEAN_COLS):
-    raise ValueError(
-        f"Expected {len(CLEAN_COLS)} columns, got {raw.shape[1]}. "
-        "Check the raw import before cleaning."
-    )
+mask_empty = df.apply(row_all_blank, axis=1)
+clean = df[~mask_empty].reset_index(drop=True)
 
-# rename by POSITION (the raw header names are junk), so this is robust
-df = raw.copy()
-df.columns = CLEAN_COLS
+# --- tidy text: strip whitespace, turn "" into NULL ---
+for c in clean.columns:
+    s = clean[c].astype("string").str.strip()
+    clean[c] = s.where(s.str.len() > 0, None)
 
-# keep only real entries: RACK ID is always a number.
-# drops the 'YELLOW SHADED...' banner row, the 'RACK ID' header row,
-# and all the empty trailing rows in one shot.
-rack = df["RACK ID"].astype("string").str.strip()
-df = df[rack.str.fullmatch(r"\d+", na=False)].reset_index(drop=True)
+# --- derive Status: Open (still in cage) vs Closed (removed) ---
+if DATE_REMOVED_COL in clean.columns:
+    dr = clean[DATE_REMOVED_COL].astype("string").str.strip()
+    is_closed = dr.notna() & (dr.str.len() > 0)
+    clean["Status"] = is_closed.map({True: "Closed", False: "Open"})
 
-# strip stray whitespace in every text cell
-for c in df.columns:
-    df[c] = df[c].astype("string").str.strip()
+# --- report ---
+print(f"Input rows : {len(df)}")
+print(f"Dropped    : {int(mask_empty.sum())} empty rows")
+print(f"Output rows: {len(clean)}")
+if "Status" in clean.columns:
+    print("\nStatus breakdown:")
+    print(clean["Status"].value_counts().to_string())
 
-print(f"Clean rows: {len(df)}")
-print(df.head(10).to_string(index=False))
-
-
-def ensure_output_dataset(project, name):
-    """Create `name` as a managed dataset if it does not exist yet, reusing
-    the storage connection of an existing dataset in the project."""
-    if name in [d["name"] for d in project.list_datasets()]:
-        return
-    conn = None
-    for probe in ("agg_top_performers", "fact_counter_verifier", "BC_Cage_Log"):
-        try:
-            raw_settings = project.get_dataset(probe).get_settings().get_raw()
-            conn = raw_settings.get("params", {}).get("connection")
-            if conn:
-                break
-        except Exception:
-            pass
-    conn = conn or "filesystem_managed"  # DSS default managed connection
-    print(f"Creating dataset {name} on connection '{conn}'")
-    builder = project.new_managed_dataset(name)
-    builder.with_store_into(conn)
-    builder.create()
-
-
-client = dataiku.api_client()
-project = client.get_default_project()
-ensure_output_dataset(project, OUTPUT)
-
-# write to the clean dataset
-dataiku.Dataset(OUTPUT).write_with_schema(df)
-print(f"Wrote {OUTPUT}")
+# --- output ---
+dataiku.Dataset(OUTPUT).write_with_schema(clean)
+print(f"\nWrote {OUTPUT}")

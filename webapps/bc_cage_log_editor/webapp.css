@@ -121,6 +121,14 @@
   width: 220px;
 }
 
+.cage-table-head select#status-filter {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: #fff;
+}
+
 .cage-table-head .cage-sub { margin-left: auto; }
 
 .cage-table-wrap {
@@ -159,3 +167,8 @@
 /* freshly added, not yet saved */
 #log-table tbody tr.pending { background: #fef9c3; }
 #log-table tbody tr.pending:hover { background: #fef08a; }
+
+/* Status badges */
+#log-table td.st { font-weight: 700; }
+#log-table td.st-open   { color: #b45309; }   /* amber — still in cage */
+#log-table td.st-closed { color: #059669; }   /* green — removed */
