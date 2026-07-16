@@ -45,6 +45,33 @@ DERIVED_COLS = {STATUS_COL}
 _NUMERIC_TYPES = {"tinyint", "smallint", "int", "bigint", "float", "double"}
 _DATE_TYPES = {"date"}
 
+# Compact display labels so long Excel headers don't hog grid width.
+# The full name still shows as a tooltip on the column header.
+SHORT_LABELS = {
+    "RACK ID": "Rack",
+    "Date (START HERE)": "Date In",
+    "Release/Repair Removal Date < 10 days": "Removal Date",
+    "Person Responsible for Disposition": "Responsible",
+    "Person Entering in Product or Rack": "Entered By",
+    "Quantity": "Qty",
+    "Tire Code(s)": "Tire Code",
+    "CQ or Condition": "CQ / Condition",
+    "Location (cage / overflow)": "Location",
+    "Disposition": "Disposition",
+    "Max. Date For Recoup <30 days": "Recoup By",
+    "Comments / Notes": "Comments",
+    "Person Removing Product or Rack": "Removed By",
+    "Date Removed": "Date Out",
+    "Status": "Status",
+}
+
+
+def _short_label(name):
+    if name in SHORT_LABELS:
+        return SHORT_LABELS[name]
+    n = " ".join(str(name).split())
+    return n if len(n) <= 14 else n[:13] + "…"
+
 
 def _apply_status(df):
     """(Re)derive Status from Date Removed: Open while blank, else Closed."""
@@ -154,6 +181,7 @@ def schema():
             input_type = "text"
         cols.append({
             "name": c["name"],
+            "label": _short_label(c["name"]),
             "type": t,
             "input": input_type,
             "derived": c["name"] in DERIVED_COLS,

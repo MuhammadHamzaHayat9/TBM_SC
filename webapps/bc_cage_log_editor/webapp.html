@@ -1,42 +1,68 @@
-<!-- BC Cage Log Editor — HTML tab of the Standard webapp -->
-<div class="cage-app">
-  <header class="cage-header">
-    <h1>BC Cage Log</h1>
-    <div class="cage-sub" id="source-line">Loading…</div>
-  </header>
+<!-- BC Cage Log — BFGoodrich-themed data grid (HTML tab) -->
+<div class="app">
 
-  <section class="cage-card">
-    <h2>Add new entry</h2>
-    <p class="cage-sub">Leave <strong>Date Removed</strong> blank for items still in the cage — Status is set automatically (Open until removed).</p>
-    <form id="add-form" class="cage-form" autocomplete="off">
-      <!-- inputs generated from the dataset schema by webapp.js -->
-      <div id="form-fields" class="cage-fields"></div>
-      <div class="cage-actions">
-        <button type="submit" class="btn btn-add">+ Add to table</button>
-        <button type="button" id="save-btn" class="btn btn-save" disabled>
-          Save all to <span id="output-name">output</span>
-        </button>
-        <span id="status-msg" class="cage-status"></span>
+  <!-- top brand bar -->
+  <header class="topbar">
+    <img class="brand-logo" id="brand-logo"
+         src="/local/static/BFGoodrich_logo.svg.png" alt="BFGoodrich">
+    <div class="titlebox">
+      <h1>BC Cage Log</h1>
+      <div class="subtitle" id="source-line">Loading…</div>
+    </div>
+    <div class="topbar-actions">
+      <button id="add-btn" class="btn btn-primary">＋ Add entry</button>
+      <button id="save-btn" class="btn btn-navy" disabled>Save changes</button>
+    </div>
+  </header>
+  <div class="accent"></div>
+
+  <!-- toolbar -->
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-ico">⌕</span>
+      <input type="search" id="global-search" placeholder="Search all columns…">
+    </div>
+    <button id="clear-filters" class="btn btn-ghost">Clear filters</button>
+    <span class="spacer"></span>
+    <span id="status-msg" class="status-msg"></span>
+    <span id="row-count" class="rowcount"></span>
+  </div>
+
+  <!-- data grid -->
+  <div class="grid-wrap">
+    <table id="grid">
+      <thead>
+        <tr id="head-row"></tr>
+        <tr id="filter-row" class="filter-row"></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="empty-note" class="empty-note" hidden>No rows match the current filters.</div>
+  </div>
+
+  <!-- shared datalists (used by both filter row and add-entry form) -->
+  <div id="datalists" hidden></div>
+</div>
+
+<!-- add-entry modal -->
+<div id="modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>Add cage log entry</h2>
+      <button id="modal-close" class="modal-x" title="Close">✕</button>
+    </div>
+    <p class="modal-hint">
+      Leave <strong>Date Out</strong> blank for items still in the cage —
+      <em>Status</em> is set automatically (Open until removed).
+    </p>
+    <form id="add-form" autocomplete="off">
+      <div id="form-fields" class="form-grid"></div>
+      <div class="modal-foot">
+        <span id="modal-msg" class="status-msg"></span>
+        <span class="spacer"></span>
+        <button type="button" id="modal-cancel" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add to grid</button>
       </div>
     </form>
-  </section>
-
-  <section class="cage-card">
-    <div class="cage-table-head">
-      <h2>Log entries</h2>
-      <select id="status-filter" title="Filter by status">
-        <option value="">All statuses</option>
-        <option value="Open">Open (in cage)</option>
-        <option value="Closed">Closed (removed)</option>
-      </select>
-      <input type="search" id="table-filter" placeholder="Filter rows…">
-      <span id="row-count" class="cage-sub"></span>
-    </div>
-    <div class="cage-table-wrap">
-      <table id="log-table">
-        <thead></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
+  </div>
 </div>
