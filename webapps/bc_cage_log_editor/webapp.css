@@ -1,0 +1,174 @@
+/* BC Cage Log Editor — CSS tab of the Standard webapp */
+
+.cage-app {
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  color: #1f2937;
+  background: #f3f4f6;
+  min-height: 100vh;
+  padding: 16px 20px 40px;
+  box-sizing: border-box;
+}
+
+.cage-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.cage-sub {
+  color: #6b7280;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.cage-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  padding: 14px 16px;
+  margin-top: 14px;
+}
+
+.cage-card h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* --- add-entry form --- */
+
+.cage-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.cage-field {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.cage-field span {
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cage-field input {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.cage-field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.cage-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-add  { background: #2563eb; color: #fff; }
+.btn-save { background: #059669; color: #fff; }
+
+.cage-status { font-size: 12px; }
+.cage-status.ok   { color: #059669; }
+.cage-status.warn { color: #b45309; }
+.cage-status.err  { color: #dc2626; }
+
+/* --- table --- */
+
+.cage-table-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cage-table-head h2 { flex: 0 0 auto; margin: 0; }
+
+.cage-table-head input[type="search"] {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  width: 220px;
+}
+
+.cage-table-head select#status-filter {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.cage-table-head .cage-sub { margin-left: auto; }
+
+.cage-table-wrap {
+  margin-top: 10px;
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+#log-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+#log-table th {
+  position: sticky;
+  top: 0;
+  background: #111827;
+  color: #f9fafb;
+  text-align: left;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+#log-table td {
+  padding: 6px 10px;
+  border-top: 1px solid #f0f1f3;
+  white-space: nowrap;
+}
+
+#log-table tbody tr:nth-child(even) { background: #f9fafb; }
+#log-table tbody tr:hover { background: #eef2ff; }
+
+/* freshly added, not yet saved */
+#log-table tbody tr.pending { background: #fef9c3; }
+#log-table tbody tr.pending:hover { background: #fef08a; }
+
+/* Status badges */
+#log-table td.st { font-weight: 700; }
+#log-table td.st-open   { color: #b45309; }   /* amber — still in cage */
+#log-table td.st-closed { color: #059669; }   /* green — removed */
