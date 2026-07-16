@@ -6,23 +6,24 @@ Paste into the Python tab of a Dataiku Code Webapp (Standard).
 `app` (a Flask app) is provided by the Dataiku backend.
 
 Endpoints:
-  GET  /schema  -> columns of the log (name + type + input + derived flag)
-  GET  /data    -> current rows (saved output if it exists, else the input)
-  POST /save    -> append the submitted new rows and write everything
-                   (original + additions) to the output dataset
+  GET  /schema  -> columns of the log (name + label + type + input + derived)
+  GET  /data    -> current rows of Bc_Cage_SP
+  POST /save    -> overwrite Bc_Cage_SP with the full table the frontend holds
+                   (existing rows with edits + new rows)
 
-Data model (from the prepare recipe):
-  * input  = bc_cage_log_prepared  (cleaned log, full Excel header names,
-             plus a derived "Status" column)
-  * output = bc_cage_log_updated   (original rows + rows added in the app)
+Data model:
+  * Bc_Cage_SP is a SINGLE editable dataset (synced once from
+    bc_cage_log_prepared). The app both reads and writes it, so add and edit
+    both rewrite the whole table here. The frontend's in-memory table is the
+    source of truth — every save sends all rows and the backend overwrites.
   * Status is DERIVED, never typed: "Open" while "Date Removed" is blank
-    (still in the cage), "Closed" once it has a date. The app recomputes it
-    on every save, so a new entry starts Open and flips to Closed when the
-    user fills Date Removed.
+    (still in the cage), "Closed" once it has a date. Recomputed on save.
 
-Setup: list both datasets in the webapp Settings > Security
-(bc_cage_log_prepared: Read, bc_cage_log_updated: Read/Write). The output
-dataset is auto-created on first save if it does not exist.
+Note: save overwrites the whole dataset (last write wins), so this is best
+for a single editor at a time. Use the reload after each save to pick up the
+latest before editing.
+
+Setup: grant Bc_Cage_SP Read/Write in the webapp Settings > Security.
 """
 
 import json
@@ -32,9 +33,10 @@ import dataiku
 import pandas as pd
 from flask import request, jsonify
 
-# Cleaned, prepared log produced by the Python recipe (BC_Cage_Log -> prepared).
-INPUT_DATASET = "bc_cage_log_prepared"
-OUTPUT_DATASET = "bc_cage_log_updated"
+# Single editable dataset: the app reads AND writes Bc_Cage_SP (synced once
+# from bc_cage_log_prepared). Add and edit both rewrite the whole table here.
+INPUT_DATASET = "Bc_Cage_SP"
+OUTPUT_DATASET = "Bc_Cage_SP"
 
 # Derived column: computed from "Date Removed", never entered by the user.
 STATUS_COL = "Status"
@@ -207,34 +209,31 @@ def data():
 
 @app.route("/save", methods=["POST"])
 def save():
+    """Overwrite Bc_Cage_SP with the full table the frontend holds (existing
+    rows with any edits + new rows). The frontend is the source of truth, so
+    every row is sent every save; Status is recomputed server-side."""
     try:
         payload = json.loads(request.data or "{}")
-        new_rows = payload.get("rows") or []
-        if not new_rows:
-            return jsonify({"error": "No new rows to save."}), 400
+        rows = payload.get("rows")
+        if rows is None:
+            return jsonify({"error": "No rows provided."}), 400
+        # Guard against wiping the dataset by accident.
+        if len(rows) == 0:
+            return jsonify({"error": "Refusing to save an empty table."}), 400
 
-        base, _ = _load_base()
-        add = pd.DataFrame(new_rows)
+        # Column order comes from the dataset schema (stable, ignores stray keys).
+        base_cols = [c["name"] for c in _schema_cols()]
+        df = pd.DataFrame(rows)
+        if base_cols:
+            df = df.reindex(columns=base_cols)
 
-        # Keep the base column order; ignore unknown keys, fill missing with NA
-        add = add.reindex(columns=base.columns)
-
-        # Coerce numeric columns so "12" from the form matches the base dtype
-        for c in base.columns:
-            if pd.api.types.is_numeric_dtype(base[c]):
-                add[c] = pd.to_numeric(add[c], errors="coerce")
-
-        full = pd.concat([base, add], ignore_index=True)
-
-        # Status is derived, never trusted from the form — recompute for all
-        # rows so new entries are Open until a Date Removed is filled in.
-        full = _apply_status(full)
+        # Status is derived, never trusted from the client.
+        df = _apply_status(df)
 
         _ensure_output_dataset()
-        out = dataiku.Dataset(OUTPUT_DATASET)
-        out.write_with_schema(full)
+        dataiku.Dataset(OUTPUT_DATASET).write_with_schema(df)
 
-        return jsonify({"saved": len(new_rows), "total": len(full)})
+        return jsonify({"saved": len(df), "total": len(df)})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

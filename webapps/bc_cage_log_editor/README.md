@@ -1,27 +1,30 @@
 # BC Cage Log Editor — Dataiku Standard Webapp
 
-A simple data-entry webapp: shows the cage log as a table, lets the user
-add new entries through a form, and saves everything (original rows +
-additions) to a new dataset `bc_cage_log_updated`.
+An editable data grid over a single dataset, **`Bc_Cage_SP`**: shows the cage
+log as a spreadsheet-style table, and lets the user **add new rows** and
+**edit existing rows** in place. Every save overwrites `Bc_Cage_SP` with the
+full table the app holds.
 
 The form and table are generated **dynamically from the dataset schema**,
 so column changes are picked up automatically.
 
-## Prerequisite: the prepared dataset
+## The dataset
 
-The app reads **`bc_cage_log_prepared`** — the cleaned log produced from the
-messy `BC_Cage_Log` Excel import. Build it first with
-`python_recipes/clean_bc_cage_log.py` (a Python recipe: input `BC_Cage_Log`,
-output `bc_cage_log_prepared`). That recipe:
+The app reads and writes **`Bc_Cage_SP`** — sync it once from the cleaned
+`bc_cage_log_prepared` (built by `python_recipes/clean_bc_cage_log.py` from
+the messy `BC_Cage_Log` Excel import). That cleaned data:
 
 - keeps the full Excel header names (`RACK ID`, `Date (START HERE)`,
   `Release/Repair Removal Date < 10 days`, … `Date Removed`);
-- drops only completely-empty rows (keeps real records even when `RACK ID`
+- drops empty / near-empty rows (keeps real records even when `RACK ID`
   is blank);
 - derives a **`Status`** column: `Open` while `Date Removed` is blank (item
   still in the cage), `Closed` once it has a date.
 
 Dates are kept as text on purpose — the source dates have no year.
+
+> Whole-table overwrite = last write wins, so this suits one editor at a
+> time. The app reloads after every save to show the latest.
 
 ## Look & feel
 
@@ -52,38 +55,38 @@ Open/Closed badge and a dropdown to filter by status.
 
 ## How it works
 
-1. On load the app reads `bc_cage_log_updated` if it already has rows
-   (so previously added entries show up), otherwise `bc_cage_log_prepared`.
-2. "**+ Add to table**" puts the form row at the top of the table,
-   highlighted yellow, as an *unsaved* row.
-3. "**Save all**" sends the unsaved rows to the backend, which appends them
-   to the current data, recomputes `Status`, and writes the full table to
-   `bc_cage_log_updated` with `write_with_schema`. The input dataset is
-   never modified.
+1. On load the app reads all rows of `Bc_Cage_SP` into memory.
+2. **Add entry** opens a modal; the new row appears at the top of the grid,
+   highlighted amber (red edge), as *unsaved*.
+3. The **✎** button on any row opens the same modal pre-filled; edits mark
+   the row *unsaved*, highlighted blue (navy edge). `Status` updates as soon
+   as you fill/clear **Date Out**.
+4. **Save changes** sends the whole in-memory table to the backend, which
+   recomputes `Status` and overwrites `Bc_Cage_SP` with `write_with_schema`,
+   then the grid reloads.
 
 ## Setup in Dataiku
 
-1. **Webapps → + New webapp → Code webapp → Standard** (pick the
+1. Sync `bc_cage_log_prepared` into a dataset named **`Bc_Cage_SP`** (any
+   writable connection).
+2. **Webapps → + New webapp → Code webapp → Standard** (pick the
    "Simple webapp" starter), name it e.g. *BC Cage Log Editor*.
-2. Paste each file into its tab:
+3. Paste each file into its tab:
    | File | Tab |
    |---|---|
    | `webapp.html` | HTML |
    | `webapp.js` | JS |
    | `webapp.css` | CSS |
    | `backend.py` | Python |
-3. In the webapp **Settings → Security** (or the "Datasets" panel), grant:
-   `bc_cage_log_prepared` → **Read**, `bc_cage_log_updated` → **Read/Write**.
-   The output dataset is auto-created on first save if it doesn't exist
-   (reusing an existing dataset's connection); or create an empty managed
-   `bc_cage_log_updated` yourself.
-4. Enable the Python backend (toggle in the Python tab) and **Start** it,
+4. In the webapp **Settings → Security** (or the "Datasets" panel), grant
+   `Bc_Cage_SP` → **Read/Write**.
+5. Enable the Python backend (toggle in the Python tab) and **Start** it,
    then **Preview**.
 
 ## Endpoints (backend.py)
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/schema` | GET | Column names/types + derived flag → table header + form inputs |
-| `/data` | GET | Current rows (output dataset if saved before, else input) |
-| `/save` | POST | Append new rows, recompute Status, write to `bc_cage_log_updated` |
+| `/schema` | GET | Column names/labels/types + derived flag → grid + form |
+| `/data` | GET | Current rows of `Bc_Cage_SP` |
+| `/save` | POST | Overwrite `Bc_Cage_SP` with the full table (edits + additions) |
